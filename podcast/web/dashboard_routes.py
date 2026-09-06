@@ -9,6 +9,7 @@ from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 
 from podcast.blob.protocol import BlobStore
+from podcast.compat import check_compatibility
 from podcast.config import Settings
 from podcast.deps import get_blob_store, get_settings
 from podcast.sync.engine import is_sync_locked
@@ -55,6 +56,12 @@ async def dashboard(
 
     is_syncing = is_sync_locked(blob_store)
 
+    incompatible = [
+        (entry.name, reason)
+        for entry in entries
+        if (reason := check_compatibility(entry)) is not None
+    ]
+
     feed_url = (
         f"{settings.podcast_base_url}/api/feed"
         f"?token={settings.feed_secret_token}"
@@ -70,6 +77,7 @@ async def dashboard(
             "quota_bytes": quota_bytes,
             "usage_pct": usage_pct,
             "is_syncing": is_syncing,
+            "incompatible": incompatible,
             "feed_url": feed_url,
             "podcast_title": settings.podcast_title,
             "flash": flash,

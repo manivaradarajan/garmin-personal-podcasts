@@ -37,6 +37,10 @@
   background: #fef3c7; color: #92400e;
   border-radius: 999px; padding: .25rem .75rem; font-size: .8rem;
 }
+.alert-card { border-left: 4px solid #ef4444; }
+.alert-card h2 { color: #b91c1c; }
+.alert-card ul { margin: .5rem 0 .5rem 1.25rem; font-size: .875rem; }
+.alert-card .hint { font-size: .8rem; color: #6b7280; margin-top: .5rem; }
 table { width: 100%; border-collapse: collapse; font-size: .875rem; }
 th { text-align: left; padding: .5rem .75rem; color: #6b7280; font-weight: 600;
      border-bottom: 1.5px solid #e5e7eb; white-space: nowrap; }
@@ -68,6 +72,19 @@ tr:last-child td { border-bottom: none; }
 
 {% if flash %}
 <div class="flash">{{ flash }}<a class="flash-close" href="/" aria-label="Dismiss">×</a></div>
+{% endif %}
+
+{% if incompatible %}
+<div class="card alert-card">
+  <h2>⚠️ May not play on Garmin 970 ({{ incompatible|length }})</h2>
+  <p>The Forerunner 970 plays MP3, M4A, and M4B. These files use other formats:</p>
+  <ul>
+    {% for name, reason in incompatible %}
+    <li><strong>{{ name }}</strong> — {{ reason }}</li>
+    {% endfor %}
+  </ul>
+  <p class="hint">Tip: Garmin also needs ID3 tags to list episodes — untagged files may not appear on the watch at all.</p>
+</div>
 {% endif %}
 
 <!-- Storage & feed info -->

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from podcast.drive.client import _parse_drive_item
+from podcast.drive.client import _AUDIO_MIME_TYPES, _parse_drive_item
 
 
 def _item(**over: object) -> dict[str, object]:
@@ -49,6 +49,7 @@ def test_all_audio_mime_types_accepted() -> None:
     """Each allowlisted audio MIME type passes through."""
     for mime in (
         "audio/mpeg",
+        "audio/mp3",
         "audio/mp4",
         "audio/ogg",
         "audio/wav",
@@ -58,6 +59,11 @@ def test_all_audio_mime_types_accepted() -> None:
     ):
         parsed = _parse_drive_item(_item(mimeType=mime))
         assert parsed is not None and parsed.mime_type == mime
+
+
+def test_uppercase_mp3_mime_in_allowlist() -> None:
+    """Drive reports uppercase .MP3 as audio/mp3 — must be listed."""
+    assert "audio/mp3" in _AUDIO_MIME_TYPES
 
 
 def test_extra_fields_are_ignored() -> None:

@@ -18,6 +18,9 @@ _LOG = logging.getLogger(__name__)
 
 _AUDIO_MIME_TYPES = (
     "audio/mpeg",
+    # Drive reports uppercase .MP3 files as audio/mp3 (non-standard
+    # but observed in the wild); without this they are silently skipped.
+    "audio/mp3",
     "audio/mp4",
     "audio/ogg",
     "audio/wav",

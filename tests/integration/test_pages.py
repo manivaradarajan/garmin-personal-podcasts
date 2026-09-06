@@ -45,6 +45,36 @@ def test_dashboard_renders_when_authed(sample_manifest_entry) -> None:
     assert resp.status_code == 200
     assert "ep1.mp3" in resp.text
     assert "a@b.com" in resp.text
+    assert "May not play on Garmin" not in resp.text
+
+
+def test_dashboard_alerts_on_incompatible_format() -> None:
+    """GET / with an OGG entry shows the Garmin compat alert."""
+    from podcast.models import ManifestEntry
+
+    settings = make_settings()
+    store = make_store()
+    store.write_manifest(
+        [
+            ManifestEntry(
+                drive_file_id="fid-ogg",
+                drive_md5="md5",
+                blob_url="https://blob.test/ep.ogg",
+                name="talk.ogg",
+                size_bytes=100,
+                mime_type="audio/ogg",
+                published_at="2026-09-05T12:00:00Z",
+            )
+        ]
+    )
+    client = _client(settings, store, authed=True)
+    try:
+        resp = client.get("/")
+    finally:
+        app.dependency_overrides.clear()
+    assert resp.status_code == 200
+    assert "May not play on Garmin 970" in resp.text
+    assert "talk.ogg" in resp.text
 
 
 def test_dashboard_redirects_when_anonymous() -> None:
