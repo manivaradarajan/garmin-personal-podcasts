@@ -6,6 +6,7 @@ import logging
 from dataclasses import replace
 from datetime import UTC, datetime
 
+from podcast.audio.tags import ensure_id3_tags
 from podcast.blob.protocol import BlobStore
 from podcast.config import Settings
 from podcast.drive.client import DriveClient
@@ -63,7 +64,9 @@ def run_sync(
     current_manifest = list(manifest)
 
     for drive_file in to_add:
-        entry = _upload_file(drive_file, blob_store, drive_client)
+        entry = _upload_file(
+            drive_file, blob_store, drive_client, settings.podcast_title
+        )
         if entry is not None:
             current_manifest.append(entry)
             blob_store.write_manifest(current_manifest)
@@ -73,7 +76,11 @@ def run_sync(
 
     for drive_file, old_entry in to_update:
         new_entry = _reupload_file(
-            drive_file, old_entry, blob_store, drive_client
+            drive_file,
+            old_entry,
+            blob_store,
+            drive_client,
+            settings.podcast_title,
         )
         if new_entry is not None:
             current_manifest = [
@@ -247,28 +254,34 @@ def _upload_file(
     drive_file: DriveFile,
     blob_store: BlobStore,
     drive_client: DriveClient,
+    album: str,
 ) -> ManifestEntry | None:
     """Upload a new Drive file to Blob storage.
+
+    MP3s gain ID3 tags for Garmin display; the manifest records the
+    tagged size so enclosure lengths match the served bytes.
 
     Args:
         drive_file: Drive file metadata.
         blob_store: Blob storage implementation.
         drive_client: Drive API client for streaming content.
+        album: Podcast name for the ID3 album frame.
 
     Returns:
         New ManifestEntry on success, None on failure.
     """
     try:
-        stream = drive_client.stream_file(drive_file.id)
+        raw = b"".join(drive_client.stream_file(drive_file.id))
+        data = ensure_id3_tags(raw, drive_file.name, album)
         blob_url = blob_store.upload(
-            drive_file.name, stream, drive_file.mime_type, cache_max_age=86400
+            drive_file.name, data, drive_file.mime_type, cache_max_age=86400
         )
         return ManifestEntry(
             drive_file_id=drive_file.id,
             drive_md5=drive_file.md5,
             blob_url=blob_url,
             name=drive_file.name,
-            size_bytes=drive_file.size_bytes,
+            size_bytes=len(data),
             mime_type=drive_file.mime_type,
             published_at=datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
         )
@@ -282,6 +295,7 @@ def _reupload_file(
     old_entry: ManifestEntry,
     blob_store: BlobStore,
     drive_client: DriveClient,
+    album: str,
 ) -> ManifestEntry | None:
     """Re-upload a changed Drive file to Blob storage.
 
@@ -293,21 +307,23 @@ def _reupload_file(
         old_entry: Existing manifest entry to update.
         blob_store: Blob storage implementation.
         drive_client: Drive API client for streaming content.
+        album: Podcast name for the ID3 album frame.
 
     Returns:
         Updated ManifestEntry on success, None on failure.
     """
     try:
-        stream = drive_client.stream_file(drive_file.id)
+        raw = b"".join(drive_client.stream_file(drive_file.id))
+        data = ensure_id3_tags(raw, drive_file.name, album)
         blob_url = blob_store.upload(
-            drive_file.name, stream, drive_file.mime_type, cache_max_age=86400
+            drive_file.name, data, drive_file.mime_type, cache_max_age=86400
         )
         new_entry = replace(
             old_entry,
             drive_md5=drive_file.md5,
             blob_url=blob_url,
             name=drive_file.name,
-            size_bytes=drive_file.size_bytes,
+            size_bytes=len(data),
             mime_type=drive_file.mime_type,
         )
         if blob_url != old_entry.blob_url:

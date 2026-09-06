@@ -40,6 +40,8 @@ class _StubDrive:
 class _StubSettings:
     """Placeholder settings (run_sync keeps it for extensibility)."""
 
+    podcast_title = "Test Cast"
+
 
 def _drive(fid: str = "id-1", md5: str = "m1") -> DriveFile:
     """Build a DriveFile with overridable id/md5."""
@@ -188,3 +190,28 @@ def test_manifest_written_incrementally() -> None:
         _StubDrive([_drive("a"), _drive("b")]),  # type: ignore[arg-type]
     )
     assert seen == [1, 2]
+
+
+def test_mp3_upload_is_tagged_and_sized() -> None:
+    """MP3 uploads gain ID3 tags; manifest records the tagged size."""
+    from pathlib import Path
+
+    raw = (
+        Path(__file__).parent.parent / "fixtures" / "untagged.mp3"
+    ).read_bytes()
+
+    class _Mp3Drive(_StubDrive):
+        def stream_file(self, file_id: str):
+            yield raw
+
+    store = InMemoryBlobStore()
+    result = run_sync(
+        _StubSettings(),  # type: ignore[arg-type]
+        store,
+        _Mp3Drive([_drive("song")]),  # type: ignore[arg-type]
+    )
+    assert result.added == 1
+    (entry,) = store.read_manifest()
+    assert entry.size_bytes > len(raw)
+    assert entry.size_bytes == len(store._blobs["song.mp3"])
+    assert store._blobs["song.mp3"][:3] == b"ID3"
