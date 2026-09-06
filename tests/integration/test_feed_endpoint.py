@@ -173,3 +173,22 @@ def test_feed_contains_guid_and_locked(sample_manifest_entry) -> None:
         ET.fromstring(second.text).find("channel").find(f"{ns}guid").text
     )
     assert first_guid == second_guid
+
+
+def test_podcast_alias_serves_identical_feed(sample_manifest_entry) -> None:
+    """The /api/podcast alias serves the same feed with matching self link."""
+    settings = make_settings()
+    store = make_store()
+    store.write_manifest([sample_manifest_entry])
+    client = _client(settings, store)
+    try:
+        legacy = client.get("/api/feed", params={"token": "feed-secret"})
+        alias = client.get("/api/podcast", params={"token": "feed-secret"})
+    finally:
+        app.dependency_overrides.clear()
+    assert alias.status_code == 200
+    assert alias.text == legacy.text.replace("/api/feed?", "/api/podcast?")
+    assert (
+        'href="https://test.example/api/podcast?token=feed-secret"'
+        in alias.text
+    )

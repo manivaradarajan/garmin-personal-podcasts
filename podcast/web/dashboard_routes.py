@@ -83,7 +83,7 @@ async def dashboard(
     ]
 
     feed_url = (
-        f"{settings.podcast_base_url}/api/feed"
+        f"{settings.podcast_base_url}/api/podcast"
         f"?token={settings.feed_secret_token}"
     )
 
