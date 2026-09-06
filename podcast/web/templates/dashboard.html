@@ -336,5 +336,34 @@ tr:last-child td { border-bottom: none; }
       if (btn) btn.textContent = "▶";
     });
   });
+
+  // --- Sync progress polling ---
+  // After "Sync Now", the run happens in the background. While a sync is
+  // active, poll the status endpoint; when it finishes, reload with the
+  // result flash instead of spinning forever on a long request.
+  (function () {
+    const badge = document.querySelector(".syncing-badge");
+    const flash = new URLSearchParams(location.search).get("flash") || "";
+    if (!badge && !flash.startsWith("Sync started")) return;
+    const startedAt = Date.now();
+    const timer = setInterval(async () => {
+      let data;
+      try {
+        const resp = await fetch("/api/sync/status");
+        data = await resp.json();
+      } catch (e) {
+        clearInterval(timer);
+        return;
+      }
+      if (data.running) {
+        const secs = Math.floor((Date.now() - startedAt) / 1000);
+        const el = document.querySelector(".syncing-badge");
+        if (el) el.textContent = "⏳ Sync in progress… " + secs + "s";
+        return;
+      }
+      clearInterval(timer);
+      location.href = "/?flash=" + encodeURIComponent(data.flash || "Sync finished");
+    }, 3000);
+  })();
 </script>
 {% endblock %}
