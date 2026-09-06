@@ -36,6 +36,7 @@ class Settings(BaseSettings):
 
     # Podcast metadata
     podcast_title: str = "My Garmin Podcasts"
+    podcast_description: str | None = None
     podcast_base_url: str = "http://localhost:3000"
 
     # Google OAuth (web dashboard login)

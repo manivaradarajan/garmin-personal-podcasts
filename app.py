@@ -18,6 +18,7 @@ from podcast.deps import get_blob_store, get_drive_client, get_settings
 from podcast.drive.client import DriveClient
 from podcast.feed.builder import build_rss_xml
 from podcast.feed.hits import record_feed_hit
+from podcast.models import ManifestEntry
 from podcast.sync.engine import (
     LockHeldError,
     _acquire_lock,
@@ -65,7 +66,7 @@ async def get_cover() -> FileResponse:
     )
 
 
-@app.get("/api/feed")
+@app.api_route("/api/feed", methods=["GET", "HEAD"])
 async def get_feed(
     request: Request,
     token: str | None = None,
@@ -74,6 +75,9 @@ async def get_feed(
 ) -> Response:
     """Serve the RSS feed — authenticated by query-string token.
 
+    Supports HEAD (headers only, same metadata as GET) and conditional
+    GET via ETag/If-None-Match so pollers can check cheaply.
+
     Args:
         request: Incoming FastAPI request.
         token: Secret token from the query string (None if absent).
@@ -81,7 +85,8 @@ async def get_feed(
         blob_store: Blob storage (injected).
 
     Returns:
-        RSS 2.0 XML response, or a 403 JSON error if the token is invalid.
+        RSS 2.0 XML response, empty HEAD/304 responses with matching
+        headers, or a 403 JSON error if the token is invalid.
     """
     user_agent = request.headers.get("user-agent")
     if not token or not hmac.compare_digest(token, settings.feed_secret_token):
@@ -94,13 +99,65 @@ async def get_feed(
         title=settings.podcast_title,
         feed_url=str(request.url),
         base_url=settings.podcast_base_url,
+        description=settings.podcast_description,
     )
+    body = xml.encode("utf-8")
+    etag = f'"{_sha256_hex(body)}"'
+    headers = {
+        "Cache-Control": "no-store",
+        "Content-Length": str(len(body)),
+        "ETag": etag,
+        "Last-Modified": _feed_last_modified(entries),
+    }
     record_feed_hit(blob_store, user_agent, 200)
+    if request.headers.get("if-none-match") == etag:
+        return Response(
+            status_code=304,
+            media_type="application/rss+xml",
+            headers=headers,
+        )
+    if request.method == "HEAD":
+        return Response(
+            content=b"",
+            media_type="application/rss+xml",
+            headers=headers,
+        )
     return Response(
         content=xml,
         media_type="application/rss+xml",
-        headers={"Cache-Control": "no-store"},
+        headers=headers,
     )
+
+
+def _sha256_hex(data: bytes) -> str:
+    """Return the hex SHA-256 digest of bytes.
+
+    Args:
+        data: Bytes to hash.
+
+    Returns:
+        Lowercase hex digest string.
+    """
+    import hashlib
+
+    return hashlib.sha256(data).hexdigest()
+
+
+def _feed_last_modified(entries: list[ManifestEntry]) -> str:
+    """Return the feed Last-Modified date from the newest entry.
+
+    Args:
+        entries: Manifest entries in the feed.
+
+    Returns:
+        RFC 2822 date of the newest episode, or now when empty.
+    """
+    from podcast.feed.builder import _iso_to_rfc2822, _rfc2822_now
+
+    if not entries:
+        return _rfc2822_now()
+    newest = max(entries, key=lambda e: e.published_at)
+    return _iso_to_rfc2822(newest.published_at)
 
 
 @app.get("/api/cron/sync")

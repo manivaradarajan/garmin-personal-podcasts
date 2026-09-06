@@ -9,9 +9,10 @@ from xml.etree.ElementTree import Element, SubElement, tostring
 
 from podcast.models import ManifestEntry
 
-__all__ = ["build_rss_xml", "canonical_mime_type"]
+__all__ = ["build_rss_xml", "canonical_mime_type", "default_description"]
 
 _ITUNES_NS = "http://www.itunes.com/dtds/podcast-1.0.dtd"
+_ITUNES_CATEGORY = "Education"
 
 # Drive reports some MIME types that are not registered IANA types
 # (notably audio/mp3 for uppercase .MP3 files). Normalise enclosure
@@ -41,17 +42,22 @@ def build_rss_xml(
     title: str,
     feed_url: str,
     base_url: str,
+    description: str | None = None,
 ) -> str:
     """Build an RSS 2.0 feed XML string from manifest entries.
 
     Entries are sorted newest-first by published_at. The result is a valid
     RSS 2.0 document with itunes: namespace elements for Garmin compatibility.
+    Output is deterministic for a given manifest: lastBuildDate tracks the
+    newest episode, so validators and crawlers see stable bytes.
 
     Args:
         entries: Manifest entries representing synced audio files.
         title: Podcast channel title.
         feed_url: Absolute URL of this feed (used as channel link and self).
         base_url: Base URL of the application.
+        description: Channel description; falls back to a generated one
+            long enough for validator minimums.
 
     Returns:
         UTF-8 encoded RSS 2.0 XML document as a string.
@@ -59,12 +65,22 @@ def build_rss_xml(
     rss = Element("rss", {"version": "2.0", "xmlns:itunes": _ITUNES_NS})
     channel = SubElement(rss, "channel")
 
-    _add_channel_metadata(channel, title, feed_url, base_url)
-
     sorted_entries = sorted(
         entries,
         key=lambda e: e.published_at,
         reverse=True,
+    )
+    if sorted_entries:
+        last_build = _iso_to_rfc2822(sorted_entries[0].published_at)
+    else:
+        last_build = _rfc2822_now()
+    _add_channel_metadata(
+        channel,
+        title,
+        feed_url,
+        base_url,
+        description or default_description(title),
+        last_build,
     )
     cover_url = f"{base_url}/cover.png"
     for entry in sorted_entries:
@@ -74,11 +90,25 @@ def build_rss_xml(
     return '<?xml version="1.0" encoding="UTF-8"?>\n' + xml_bytes
 
 
+def default_description(title: str) -> str:
+    """Return a validator-safe channel description for a title.
+
+    Args:
+        title: Podcast channel title.
+
+    Returns:
+        Description string exceeding common 50-character minimums.
+    """
+    return f"{title} — private personal podcast feed, synced from Google Drive"
+
+
 def _add_channel_metadata(
     channel: Element,
     title: str,
     feed_url: str,
     base_url: str,
+    description: str,
+    last_build: str,
 ) -> None:
     """Populate RSS channel-level metadata elements.
 
@@ -87,15 +117,18 @@ def _add_channel_metadata(
         title: Podcast channel title.
         feed_url: Absolute URL of this feed.
         base_url: Base URL of the application.
+        description: Channel description text.
+        last_build: Preformatted RFC 2822 build timestamp.
     """
     SubElement(channel, "title").text = title
     SubElement(channel, "link").text = base_url
-    SubElement(channel, "description").text = title
+    SubElement(channel, "description").text = description
     SubElement(channel, "language").text = "en"
     SubElement(channel, "itunes:author").text = title
-    SubElement(channel, "itunes:explicit").text = "no"
+    SubElement(channel, "itunes:explicit").text = "false"
     SubElement(channel, "itunes:image", {"href": f"{base_url}/cover.png"})
-    SubElement(channel, "lastBuildDate").text = _rfc2822_now()
+    SubElement(channel, "itunes:category", {"text": _ITUNES_CATEGORY})
+    SubElement(channel, "lastBuildDate").text = last_build
     SubElement(
         channel,
         "atom:link",
@@ -125,6 +158,8 @@ def _add_item(
     SubElement(item, "itunes:author").text = author
     SubElement(item, "itunes:subtitle").text = entry.name
     SubElement(item, "itunes:image", {"href": cover_url})
+    SubElement(item, "itunes:explicit").text = "false"
+    SubElement(item, "itunes:episodeType").text = "full"
     guid = SubElement(item, "guid", {"isPermaLink": "false"})
     guid.text = entry.drive_file_id
     SubElement(item, "pubDate").text = _iso_to_rfc2822(entry.published_at)

@@ -78,3 +78,52 @@ def test_feed_request_is_recorded() -> None:
         app.dependency_overrides.clear()
     (hit,) = read_feed_hits(store)
     assert hit.status == 200
+
+
+def test_feed_head_returns_headers_without_body() -> None:
+    """HEAD yields feed headers and an empty body."""
+    settings = make_settings()
+    client = _client(settings, make_store())
+    try:
+        resp = client.request(
+            "HEAD", "/api/feed", params={"token": "feed-secret"}
+        )
+    finally:
+        app.dependency_overrides.clear()
+    assert resp.status_code == 200
+    assert resp.content == b""
+    assert "content-length" in resp.headers
+    assert "etag" in resp.headers
+    assert "last-modified" in resp.headers
+
+
+def test_feed_conditional_get_returns_304() -> None:
+    """Matching If-None-Match yields 304 with validators."""
+    settings = make_settings()
+    client = _client(settings, make_store())
+    try:
+        first = client.get("/api/feed", params={"token": "feed-secret"})
+        etag = first.headers["etag"]
+        second = client.get(
+            "/api/feed",
+            params={"token": "feed-secret"},
+            headers={"if-none-match": etag},
+        )
+    finally:
+        app.dependency_overrides.clear()
+    assert second.status_code == 304
+    assert second.headers["etag"] == etag
+
+
+def test_feed_get_carries_caching_headers() -> None:
+    """GET responses include length, ETag, and Last-Modified."""
+    settings = make_settings()
+    client = _client(settings, make_store())
+    try:
+        resp = client.get("/api/feed", params={"token": "feed-secret"})
+    finally:
+        app.dependency_overrides.clear()
+    assert resp.status_code == 200
+    assert int(resp.headers["content-length"]) == len(resp.content)
+    assert resp.headers["etag"].startswith('"')
+    assert "last-modified" in resp.headers

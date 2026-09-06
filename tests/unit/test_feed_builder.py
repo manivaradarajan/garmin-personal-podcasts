@@ -166,7 +166,7 @@ def test_channel_has_itunes_author_and_explicit() -> None:
     assert channel is not None
     ns = "{http://www.itunes.com/dtds/podcast-1.0.dtd}"
     assert channel.findtext(f"{ns}author") == "My Cast"
-    assert channel.findtext(f"{ns}explicit") == "no"
+    assert channel.findtext(f"{ns}explicit") == "false"
 
 
 def test_item_has_itunes_duration_when_known() -> None:
@@ -217,3 +217,53 @@ def test_item_author_and_subtitle_present() -> None:
     assert item is not None
     assert item.findtext(f"{ns}author") == "My Cast"
     assert item.findtext(f"{ns}subtitle") == "Episode 1.mp3"
+
+
+def test_channel_has_education_category() -> None:
+    """Channel declares the Education iTunes category."""
+    xml = build_rss_xml([], "T", "https://f/feed", "https://base")
+    ns = "{http://www.itunes.com/dtds/podcast-1.0.dtd}"
+    channel = ET.fromstring(xml).find("channel")
+    assert channel is not None
+    category = channel.find(f"{ns}category")
+    assert category is not None and category.get("text") == "Education"
+
+
+def test_channel_description_defaults_long() -> None:
+    """Default channel description exceeds validator minimums."""
+    from podcast.feed.builder import default_description
+
+    xml = build_rss_xml([], "T", "https://f/feed", "https://base")
+    desc = ET.fromstring(xml).findtext("channel/description")
+    assert desc == default_description("T")
+    assert len(desc or "") >= 50
+
+
+def test_channel_description_uses_custom_value() -> None:
+    """Custom description overrides the generated default."""
+    xml = build_rss_xml(
+        [], "T", "https://f/feed", "https://base", description="Custom desc"
+    )
+    assert ET.fromstring(xml).findtext("channel/description") == "Custom desc"
+
+
+def test_items_carry_explicit_and_episode_type() -> None:
+    """Each item declares non-explicit full-episode flags."""
+    xml = build_rss_xml([_entry()], "T", "https://f/feed", "https://base")
+    ns = "{http://www.itunes.com/dtds/podcast-1.0.dtd}"
+    item = ET.fromstring(xml).find(".//item")
+    assert item is not None
+    assert item.findtext(f"{ns}explicit") == "false"
+    assert item.findtext(f"{ns}episodeType") == "full"
+
+
+def test_last_build_date_tracks_newest_episode() -> None:
+    """lastBuildDate is deterministic per manifest, not wall-clock."""
+    first = build_rss_xml([_entry()], "T", "https://f/feed", "https://base")
+    second = build_rss_xml([_entry()], "T", "https://f/feed", "https://base")
+    assert ET.fromstring(first).findtext(
+        "channel/lastBuildDate"
+    ) == ET.fromstring(second).findtext("channel/lastBuildDate")
+    assert "Sep 2026" in (
+        ET.fromstring(first).findtext("channel/lastBuildDate") or ""
+    )
