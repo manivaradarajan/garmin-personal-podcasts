@@ -18,6 +18,7 @@ env/
 # Secrets
 .env.local
 .env
+!.env.local.example
 *.json.b64
 sa-key.json
 
@@ -35,5 +36,3 @@ sa-key.json
 
 # Logs
 *.log
-.vercel
-.env*

@@ -6,9 +6,11 @@ from fastapi.testclient import TestClient
 
 from app import app
 from podcast.auth.session import create_session_cookie
+from podcast.config import Settings
 from podcast.deps import get_blob_store, get_drive_client, get_settings
 from podcast.drive.client import DriveListError
 from podcast.models import DriveFile
+from tests.conftest import InMemoryBlobStore
 from tests.integration.helpers import make_settings, make_store
 
 
@@ -24,7 +26,12 @@ class _StubDrive:
         return list(self._files)
 
 
-def _client(settings, store, authed: bool = False, drive=None) -> TestClient:
+def _client(
+    settings: Settings,
+    store: InMemoryBlobStore,
+    authed: bool = False,
+    drive: object = None,
+) -> TestClient:
     """Build a TestClient with overrides, optionally with a session."""
     app.dependency_overrides[get_settings] = lambda: settings
     app.dependency_overrides[get_blob_store] = lambda: store

@@ -16,6 +16,7 @@ from podcast.auth.google_oauth import build_oauth_client
 from podcast.auth.session import create_session_cookie
 from podcast.config import Settings
 from podcast.deps import get_settings
+from podcast.web.middleware import parse_allowed_emails
 
 __all__ = ["router"]
 
@@ -25,6 +26,7 @@ _TEMPLATES_DIR = Path(__file__).parent / "templates"
 _templates = Jinja2Templates(directory=str(_TEMPLATES_DIR))
 _STATE_MAX_AGE = 300  # 5 minutes
 _STATE_SALT = "oauth_state"
+_SESSION_MAX_AGE = 86400  # 24 hours, matches session cookie TTL
 
 
 def _state_serializer(secret_key: str) -> URLSafeTimedSerializer:
@@ -126,38 +128,12 @@ async def auth_callback(
     ):
         return HTMLResponse("Invalid state — possible CSRF", status_code=400)
 
-    oauth = build_oauth_client(
-        settings.google_oauth_client_id,
-        settings.google_oauth_client_secret,
-    )
     try:
-        token = await oauth.google.authorize_access_token(request)
-    except Exception:
-        return HTMLResponse("OAuth2 token exchange failed", status_code=400)
+        email = await _exchange_code_for_email(request, settings)
+    except _OAuthError as exc:
+        return HTMLResponse(str(exc), status_code=exc.status_code)
 
-    userinfo = token.get("userinfo") or {}
-    email: str = (userinfo.get("email") or "").lower()
-
-    allowed = {
-        e.strip().lower()
-        for e in settings.allowed_emails.split(",")
-        if e.strip()
-    }
-    if email not in allowed:
-        return HTMLResponse("Not authorized", status_code=403)
-
-    session_value = create_session_cookie(email, settings.session_secret_key)
-    response = RedirectResponse(url="/", status_code=302)
-    response.set_cookie(
-        "session",
-        session_value,
-        max_age=86400,
-        httponly=True,
-        secure=request.url.scheme == "https",
-        samesite="lax",
-    )
-    response.delete_cookie("oauth_state")
-    return response
+    return _issue_session_redirect(request, email, settings)
 
 
 @router.get("/auth/logout")
@@ -173,6 +149,76 @@ async def logout() -> RedirectResponse:
 
 
 # ---
+
+
+class _OAuthError(Exception):
+    """OAuth callback failure with an HTTP status for the response."""
+
+    def __init__(self, message: str, status_code: int) -> None:
+        """Store the message and status code.
+
+        Args:
+            message: Human-readable error description.
+            status_code: HTTP status for the error response.
+        """
+        super().__init__(message)
+        self.status_code = status_code
+
+
+async def _exchange_code_for_email(request: Request, settings: Settings) -> str:
+    """Exchange the OAuth code for the authenticated email address.
+
+    Args:
+        request: Incoming FastAPI request.
+        settings: Application settings.
+
+    Returns:
+        Lowercased email address from the ID token.
+
+    Raises:
+        _OAuthError: If the exchange fails or the email is not allowed.
+    """
+    oauth = build_oauth_client(
+        settings.google_oauth_client_id,
+        settings.google_oauth_client_secret,
+    )
+    try:
+        token = await oauth.google.authorize_access_token(request)
+    except Exception as exc:
+        raise _OAuthError("OAuth2 token exchange failed", 400) from exc
+
+    userinfo = token.get("userinfo") or {}
+    email: str = (userinfo.get("email") or "").lower()
+    if email not in parse_allowed_emails(settings.allowed_emails):
+        raise _OAuthError("Not authorized", 403)
+    return email
+
+
+def _issue_session_redirect(
+    request: Request, email: str, settings: Settings
+) -> RedirectResponse:
+    """Issue a signed session cookie and redirect to the dashboard.
+
+    Args:
+        request: Incoming FastAPI request.
+        email: Authenticated user's email address.
+        settings: Application settings.
+
+    Returns:
+        Redirect response carrying the session cookie.
+    """
+    session_value = create_session_cookie(email, settings.session_secret_key)
+    response = RedirectResponse(url="/", status_code=302)
+    response.set_cookie(
+        "session",
+        session_value,
+        max_age=_SESSION_MAX_AGE,
+        httponly=True,
+        secure=request.url.scheme == "https",
+        samesite="lax",
+    )
+    response.delete_cookie("oauth_state")
+    return response
 
 
 def _validate_state(

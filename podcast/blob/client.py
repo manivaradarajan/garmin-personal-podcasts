@@ -18,6 +18,7 @@ __all__ = ["VercelBlobStore"]
 _LOG = logging.getLogger(__name__)
 _MANIFEST_PATH = "manifest.json"
 _MANIFEST_CACHE_MAX_AGE = 60  # seconds
+_MULTIPART_THRESHOLD_BYTES = 10 * 1024 * 1024  # 10 MB
 
 
 class VercelBlobStore:
@@ -52,7 +53,8 @@ class VercelBlobStore:
         Args:
             path: Destination path within the store (stable per file).
             data: File content as bytes or a bytes iterator.
-            mime_type: MIME type of the uploaded content.
+            mime_type: Declared MIME type (reserved for interface
+                stability; Blob storage guesses from the path extension).
             cache_max_age: Cache-Control max-age in seconds.
 
         Returns:
@@ -61,22 +63,7 @@ class VercelBlobStore:
         if isinstance(data, Iterator):
             data = b"".join(data)
 
-        # vercel_blob >= 0.4 sends options as HTTP headers: all values
-        # must be strings. contentType is not honored (MIME is guessed
-        # from the path extension); the canonical type lives in the
-        # manifest entry written by the sync engine.
-        result = vercel_blob.put(
-            path,
-            data,
-            {
-                "token": self._token,
-                "cacheControlMaxAge": str(cache_max_age),
-                "access": "public",
-                "addRandomSuffix": "false",
-                "allowOverwrite": "true",
-            },
-        )
-        return result["url"]
+        return self._put(path, data, cache_max_age)
 
     def delete(self, url: str) -> None:
         """Delete a Blob object by its public URL.
@@ -130,7 +117,27 @@ class VercelBlobStore:
             data: Content to write.
             cache_max_age: Cache-Control max-age in seconds.
         """
-        vercel_blob.put(
+        self._put(path, data, cache_max_age)
+
+    def _put(self, path: str, data: bytes, cache_max_age: int) -> str:
+        """PUT bytes to a stable path, overwriting, and return its URL.
+
+        Large payloads use multipart upload (parallel 5 MB parts),
+        which matters for 30–60 MB episodes on time-boxed functions.
+
+        Args:
+            path: Destination path within the store.
+            data: Content to write.
+            cache_max_age: Cache-Control max-age in seconds.
+
+        Returns:
+            Public URL of the object.
+        """
+        # vercel_blob >= 0.4 sends options as HTTP headers: all values
+        # must be strings. contentType is not honored (MIME is guessed
+        # from the path extension); the canonical type lives in the
+        # manifest entry written by the sync engine.
+        result = vercel_blob.put(
             path,
             data,
             {
@@ -140,7 +147,9 @@ class VercelBlobStore:
                 "addRandomSuffix": "false",
                 "allowOverwrite": "true",
             },
+            multipart=len(data) > _MULTIPART_THRESHOLD_BYTES,
         )
+        return result["url"]
 
     def read_manifest(self) -> list[ManifestEntry]:
         """Read and deserialise the manifest from Blob storage.

@@ -66,7 +66,6 @@ async def get_cover() -> FileResponse:
     )
 
 
-@app.api_route("/api/feed", methods=["GET", "HEAD"])
 @app.api_route("/api/podcast", methods=["GET", "HEAD"])
 async def get_feed(
     request: Request,
@@ -91,9 +90,43 @@ async def get_feed(
     """
     user_agent = request.headers.get("user-agent")
     if not token or not hmac.compare_digest(token, settings.feed_secret_token):
-        record_feed_hit(blob_store, user_agent, 403)
+        _record_hit_async(blob_store, user_agent, 403)
         return JSONResponse({"error": "Forbidden"}, status_code=403)
 
+    xml, headers = _build_feed_payload(request, settings, blob_store)
+    _record_hit_async(blob_store, user_agent, 200)
+    if request.headers.get("if-none-match") == headers["ETag"]:
+        return Response(
+            status_code=304,
+            media_type="application/rss+xml",
+            headers=headers,
+        )
+    if request.method == "HEAD":
+        return Response(
+            content=b"",
+            media_type="application/rss+xml",
+            headers=headers,
+        )
+    return Response(
+        content=xml,
+        media_type="application/rss+xml",
+        headers=headers,
+    )
+
+
+def _build_feed_payload(
+    request: Request, settings: Settings, blob_store: BlobStore
+) -> tuple[str, dict[str, str]]:
+    """Build feed XML and its caching headers.
+
+    Args:
+        request: Incoming FastAPI request (path only; host is ignored).
+        settings: Application settings.
+        blob_store: Blob storage implementation.
+
+    Returns:
+        Tuple of (feed XML string, response headers dict).
+    """
     entries = blob_store.read_manifest()
     # Base URL from config (the request host may be a deployment-specific
     # alias), path from the request so each route is self-consistent.
@@ -111,31 +144,37 @@ async def get_feed(
         podcast_guid=_podcast_guid(settings),
     )
     body = xml.encode("utf-8")
-    etag = f'"{_sha256_hex(body)}"'
     headers = {
         "Cache-Control": "no-store",
         "Content-Length": str(len(body)),
-        "ETag": etag,
+        "ETag": f'"{_sha256_hex(body)}"',
         "Last-Modified": _feed_last_modified(entries),
     }
-    record_feed_hit(blob_store, user_agent, 200)
-    if request.headers.get("if-none-match") == etag:
-        return Response(
-            status_code=304,
-            media_type="application/rss+xml",
-            headers=headers,
-        )
-    if request.method == "HEAD":
-        return Response(
-            content=b"",
-            media_type="application/rss+xml",
-            headers=headers,
-        )
-    return Response(
-        content=xml,
-        media_type="application/rss+xml",
-        headers=headers,
+    return xml, headers
+
+
+def _record_hit_async(
+    blob_store: BlobStore, user_agent: str | None, status: int
+) -> None:
+    """Record a feed hit without delaying the response.
+
+    Hit logging performs Blob reads/writes; doing it on a daemon
+    thread keeps feed latency to a single manifest read. Missed writes
+    on serverless freeze are acceptable for diagnostics.
+
+    Args:
+        blob_store: Blob storage implementation.
+        user_agent: Raw User-Agent header value, or None if absent.
+        status: HTTP status code served for the request.
+    """
+    import threading
+
+    thread = threading.Thread(
+        target=record_feed_hit,
+        args=(blob_store, user_agent, status),
+        daemon=True,
     )
+    thread.start()
 
 
 def _sha256_hex(data: bytes) -> str:
@@ -210,7 +249,7 @@ async def cron_sync(
     blob_store: BlobStore = Depends(get_blob_store),
     drive_client: DriveClient = Depends(get_drive_client),
 ) -> JSONResponse:
-    """Hourly cron endpoint — protected by Vercel cron schedule header.
+    """Daily cron endpoint — protected by Vercel cron schedule header.
 
     Returns 403 if the Vercel cron header is absent. Uses the same lock
     mechanism as the manual trigger to prevent concurrent runs.

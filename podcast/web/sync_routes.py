@@ -13,7 +13,7 @@ from __future__ import annotations
 import logging
 import threading
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse, RedirectResponse
 
 from podcast.blob.protocol import BlobStore
@@ -75,7 +75,6 @@ def _run_in_background(
 
 @router.post("/api/sync/trigger")
 async def trigger_sync(
-    request: Request,
     email: str = Depends(require_login),
     settings: Settings = Depends(get_settings),
     blob_store: BlobStore = Depends(get_blob_store),
@@ -87,7 +86,6 @@ async def trigger_sync(
     as in-progress), then hands the run to a daemon thread.
 
     Args:
-        request: Incoming FastAPI request.
         email: Authenticated user's email (injected by require_login).
         settings: Application settings (injected).
         blob_store: Blob storage (injected).

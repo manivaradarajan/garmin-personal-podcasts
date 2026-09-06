@@ -7,11 +7,13 @@ import xml.etree.ElementTree as ET
 from fastapi.testclient import TestClient
 
 from app import app
+from podcast.config import Settings
 from podcast.deps import get_blob_store, get_settings
+from tests.conftest import InMemoryBlobStore
 from tests.integration.helpers import make_settings, make_store
 
 
-def _client(settings, store) -> TestClient:
+def _client(settings: Settings, store: InMemoryBlobStore) -> TestClient:
     """Build a TestClient with settings/store overrides."""
     app.dependency_overrides[get_settings] = lambda: settings
     app.dependency_overrides[get_blob_store] = lambda: store
@@ -26,7 +28,7 @@ def test_feed_returns_rss_xml_with_valid_token(sample_manifest_entry) -> None:
     store.write_manifest([sample_manifest_entry])
     client = _client(settings, store)
     try:
-        resp = client.get("/api/feed", params={"token": "feed-secret"})
+        resp = client.get("/api/podcast", params={"token": "feed-secret"})
     finally:
         app.dependency_overrides.clear()
     assert resp.status_code == 200
@@ -39,7 +41,7 @@ def test_feed_returns_403_with_wrong_token() -> None:
     settings = make_settings()
     client = _client(settings, make_store())
     try:
-        resp = client.get("/api/feed", params={"token": "nope"})
+        resp = client.get("/api/podcast", params={"token": "nope"})
     finally:
         app.dependency_overrides.clear()
     assert resp.status_code == 403
@@ -50,7 +52,7 @@ def test_feed_returns_403_with_missing_token() -> None:
     settings = make_settings()
     client = _client(settings, make_store())
     try:
-        resp = client.get("/api/feed")
+        resp = client.get("/api/podcast")
     finally:
         app.dependency_overrides.clear()
     assert resp.status_code == 403
@@ -61,7 +63,7 @@ def test_feed_cache_control_no_store() -> None:
     settings = make_settings()
     client = _client(settings, make_store())
     try:
-        resp = client.get("/api/feed", params={"token": "feed-secret"})
+        resp = client.get("/api/podcast", params={"token": "feed-secret"})
     finally:
         app.dependency_overrides.clear()
     assert resp.headers.get("cache-control") == "no-store"
@@ -69,17 +71,26 @@ def test_feed_cache_control_no_store() -> None:
 
 def test_feed_request_is_recorded() -> None:
     """A feed request appends a hit to the injected store."""
+    import time
+
     from podcast.feed.hits import read_feed_hits
 
     settings = make_settings()
     store = make_store()
     client = _client(settings, store)
     try:
-        client.get("/api/feed", params={"token": "feed-secret"})
+        client.get("/api/podcast", params={"token": "feed-secret"})
+        deadline = time.time() + 5.0
+        hits = []
+        while time.time() < deadline:
+            hits = read_feed_hits(store)
+            if hits:
+                break
+            time.sleep(0.05)
     finally:
         app.dependency_overrides.clear()
-    (hit,) = read_feed_hits(store)
-    assert hit.status == 200
+    assert len(hits) == 1
+    assert hits[0].status == 200
 
 
 def test_feed_head_returns_headers_without_body() -> None:
@@ -88,7 +99,7 @@ def test_feed_head_returns_headers_without_body() -> None:
     client = _client(settings, make_store())
     try:
         resp = client.request(
-            "HEAD", "/api/feed", params={"token": "feed-secret"}
+            "HEAD", "/api/podcast", params={"token": "feed-secret"}
         )
     finally:
         app.dependency_overrides.clear()
@@ -104,10 +115,10 @@ def test_feed_conditional_get_returns_304() -> None:
     settings = make_settings()
     client = _client(settings, make_store())
     try:
-        first = client.get("/api/feed", params={"token": "feed-secret"})
+        first = client.get("/api/podcast", params={"token": "feed-secret"})
         etag = first.headers["etag"]
         second = client.get(
-            "/api/feed",
+            "/api/podcast",
             params={"token": "feed-secret"},
             headers={"if-none-match": etag},
         )
@@ -122,7 +133,7 @@ def test_feed_get_carries_caching_headers() -> None:
     settings = make_settings()
     client = _client(settings, make_store())
     try:
-        resp = client.get("/api/feed", params={"token": "feed-secret"})
+        resp = client.get("/api/podcast", params={"token": "feed-secret"})
     finally:
         app.dependency_overrides.clear()
     assert resp.status_code == 200
@@ -139,16 +150,14 @@ def test_feed_self_link_uses_configured_base_url(sample_manifest_entry) -> None:
     client = _client(settings, store)
     try:
         resp = client.get(
-            "/api/feed",
+            "/api/podcast",
             params={"token": "feed-secret"},
             headers={"host": "other-host.test"},
         )
     finally:
         app.dependency_overrides.clear()
     assert resp.status_code == 200
-    assert (
-        'href="https://canonical.test/api/feed?token=feed-secret"' in resp.text
-    )
+    assert "canonical.test/api/podcast?token=feed-secret" in resp.text
 
 
 def test_feed_contains_guid_and_locked(sample_manifest_entry) -> None:
@@ -158,8 +167,8 @@ def test_feed_contains_guid_and_locked(sample_manifest_entry) -> None:
     store.write_manifest([sample_manifest_entry])
     client = _client(settings, store)
     try:
-        first = client.get("/api/feed", params={"token": "feed-secret"})
-        second = client.get("/api/feed", params={"token": "feed-secret"})
+        first = client.get("/api/podcast", params={"token": "feed-secret"})
+        second = client.get("/api/podcast", params={"token": "feed-secret"})
     finally:
         app.dependency_overrides.clear()
     assert first.status_code == 200
@@ -175,8 +184,8 @@ def test_feed_contains_guid_and_locked(sample_manifest_entry) -> None:
     assert first_guid == second_guid
 
 
-def test_podcast_alias_serves_identical_feed(sample_manifest_entry) -> None:
-    """The /api/podcast alias serves the same feed with matching self link."""
+def test_legacy_feed_path_is_gone(sample_manifest_entry) -> None:
+    """Retired /api/feed 404s; /api/podcast is the canonical feed."""
     settings = make_settings()
     store = make_store()
     store.write_manifest([sample_manifest_entry])
@@ -186,8 +195,8 @@ def test_podcast_alias_serves_identical_feed(sample_manifest_entry) -> None:
         alias = client.get("/api/podcast", params={"token": "feed-secret"})
     finally:
         app.dependency_overrides.clear()
+    assert legacy.status_code == 404
     assert alias.status_code == 200
-    assert alias.text == legacy.text.replace("/api/feed?", "/api/podcast?")
     assert (
         'href="https://test.example/api/podcast?token=feed-secret"'
         in alias.text

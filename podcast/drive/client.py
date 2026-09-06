@@ -12,9 +12,14 @@ from googleapiclient.http import MediaIoBaseDownload
 
 from podcast.models import DriveFile
 
-__all__ = ["DriveClient", "DriveListError"]
+__all__ = ["DriveClient", "DriveJson", "DriveListError"]
 
 _LOG = logging.getLogger(__name__)
+
+# Raw Drive API JSON. Values are dynamic by nature (external API
+# boundary); all parsing funnels through _parse_drive_item, which
+# validates required fields before constructing domain objects.
+DriveJson = dict[str, Any]
 
 _AUDIO_MIME_TYPES = (
     "audio/mpeg",
@@ -29,6 +34,7 @@ _AUDIO_MIME_TYPES = (
     "audio/x-m4a",
 )
 _PAGE_SIZE = 100
+_CHUNK_SIZE = 1024 * 1024  # 1 MB Drive download/stream chunks
 _LIST_FIELDS = (
     "nextPageToken,"
     "files(id,name,mimeType,size,md5Checksum,"
@@ -101,10 +107,7 @@ class DriveClient:
                 raise DriveListError(f"Drive listing failed: {exc}") from exc
 
             for item in response.get("files", []):
-                if item.get("mimeType") == _SHORTCUT_MIME_TYPE:
-                    drive_file = self._resolve_shortcut(item)
-                else:
-                    drive_file = _parse_drive_item(item)
+                drive_file = self._parse_listing_item(item)
                 if drive_file is not None:
                     files.append(drive_file)
 
@@ -113,6 +116,19 @@ class DriveClient:
                 break
 
         return files
+
+    def _parse_listing_item(self, item: DriveJson) -> DriveFile | None:
+        """Parse one listing item, resolving shortcuts to targets.
+
+        Args:
+            item: Raw item dict from the Drive listing page.
+
+        Returns:
+            Parsed DriveFile, or None for skipped items.
+        """
+        if item.get("mimeType") == _SHORTCUT_MIME_TYPE:
+            return self._resolve_shortcut(item)
+        return _parse_drive_item(item)
 
     def stream_file(self, file_id: str) -> Iterator[bytes]:
         """Stream audio file content from Drive in chunks.
@@ -133,13 +149,13 @@ class DriveClient:
         target_id = self._target_id_for(file_id)
         request = self._service.files().get_media(fileId=target_id)
         buffer = io.BytesIO()
-        downloader = MediaIoBaseDownload(buffer, request, chunksize=1024 * 1024)
+        downloader = MediaIoBaseDownload(buffer, request, chunksize=_CHUNK_SIZE)
         done = False
         while not done:
             _, done = downloader.next_chunk()
         buffer.seek(0)
         while True:
-            chunk = buffer.read(1024 * 1024)
+            chunk = buffer.read(_CHUNK_SIZE)
             if not chunk:
                 break
             yield chunk
@@ -168,7 +184,7 @@ class DriveClient:
                 return details["targetId"]
         return file_id
 
-    def _resolve_shortcut(self, item: dict[str, Any]) -> DriveFile | None:
+    def _resolve_shortcut(self, item: DriveJson) -> DriveFile | None:
         """Resolve a shortcut item to its audio target file.
 
         Args:
@@ -237,7 +253,7 @@ class DriveClient:
             md5=target_md5,
         )
 
-    def _fetch_page(self, query: str, page_token: str | None) -> dict[str, Any]:
+    def _fetch_page(self, query: str, page_token: str | None) -> DriveJson:
         """Execute one Drive files.list page request.
 
         Args:
@@ -247,7 +263,7 @@ class DriveClient:
         Returns:
             Raw Drive API response dict.
         """
-        kwargs: dict[str, Any] = {
+        kwargs: DriveJson = {
             "q": query,
             "pageSize": _PAGE_SIZE,
             "fields": _LIST_FIELDS,
@@ -260,7 +276,7 @@ class DriveClient:
 # ---
 
 
-def _parse_drive_item(item: dict[str, Any]) -> DriveFile | None:
+def _parse_drive_item(item: DriveJson) -> DriveFile | None:
     """Convert a raw Drive API item dict to a DriveFile.
 
     Returns None and logs a warning if required fields are missing.

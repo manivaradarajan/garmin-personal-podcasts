@@ -7,8 +7,10 @@ from datetime import UTC, datetime, timedelta
 from fastapi.testclient import TestClient
 
 from app import app
+from podcast.config import Settings
 from podcast.deps import get_blob_store, get_drive_client, get_settings
 from podcast.models import DriveFile
+from tests.conftest import InMemoryBlobStore
 from tests.integration.helpers import make_settings, make_store
 
 
@@ -28,7 +30,9 @@ class _StubDrive:
         yield b"bytes"
 
 
-def _client(settings, store, drive) -> TestClient:
+def _client(
+    settings: Settings, store: InMemoryBlobStore, drive: _StubDrive
+) -> TestClient:
     """Build a TestClient with cron dependency overrides."""
     app.dependency_overrides[get_settings] = lambda: settings
     app.dependency_overrides[get_blob_store] = lambda: store

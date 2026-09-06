@@ -30,7 +30,8 @@ class BlobStore(Protocol):
         Args:
             path: Destination path / filename within the store.
             data: File content as bytes or a bytes iterator.
-            mime_type: MIME type of the uploaded content.
+            mime_type: Declared MIME type (implementations may guess
+                from the path extension instead).
             cache_max_age: Cache-Control max-age in seconds.
 
         Returns:

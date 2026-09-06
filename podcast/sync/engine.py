@@ -66,7 +66,7 @@ def run_sync(
     so that a partial run leaves Blob contents consistent.
 
     Args:
-        settings: App settings (kept for extensibility).
+        settings: App settings (podcast title for ID3 frames).
         blob_store: Blob storage implementation.
         drive_client: Drive API client.
 
@@ -82,59 +82,123 @@ def run_sync(
     to_add, to_update, to_delete, unchanged = compute_diff(
         drive_files, manifest
     )
+    album = settings.podcast_title
 
-    added = updated = deleted = errors = 0
-    current_manifest = list(manifest)
-
-    for drive_file in to_add:
-        entry = _upload_file(
-            drive_file, blob_store, drive_client, settings.podcast_title
-        )
-        if entry is not None:
-            current_manifest.append(entry)
-            blob_store.write_manifest(current_manifest)
-            added += 1
-        else:
-            errors += 1
-
-    for drive_file, old_entry in to_update:
-        new_entry = _reupload_file(
-            drive_file,
-            old_entry,
-            blob_store,
-            drive_client,
-            settings.podcast_title,
-        )
-        if new_entry is not None:
-            current_manifest = [
-                new_entry if e.drive_file_id == old_entry.drive_file_id else e
-                for e in current_manifest
-            ]
-            blob_store.write_manifest(current_manifest)
-            updated += 1
-        else:
-            errors += 1
-
-    for old_entry in to_delete:
-        success = _delete_blob_entry(old_entry, blob_store)
-        if success:
-            current_manifest = [
-                e
-                for e in current_manifest
-                if e.drive_file_id != old_entry.drive_file_id
-            ]
-            blob_store.write_manifest(current_manifest)
-            deleted += 1
-        else:
-            errors += 1
+    manifest, added, add_errors = _apply_adds(
+        blob_store, drive_client, album, manifest, to_add
+    )
+    manifest, updated, update_errors = _apply_updates(
+        blob_store, drive_client, album, manifest, to_update
+    )
+    manifest, deleted, delete_errors = _apply_deletes(
+        blob_store, manifest, to_delete
+    )
 
     return SyncResult(
         added=added,
         updated=updated,
         deleted=deleted,
         unchanged=unchanged,
-        errors=errors,
+        errors=add_errors + update_errors + delete_errors,
     )
+
+
+def _apply_adds(
+    blob_store: BlobStore,
+    drive_client: DriveClient,
+    album: str,
+    manifest: list[ManifestEntry],
+    to_add: list[DriveFile],
+) -> tuple[list[ManifestEntry], int, int]:
+    """Upload new files, committing the manifest after each one.
+
+    Args:
+        blob_store: Blob storage implementation.
+        drive_client: Drive API client.
+        album: Podcast name for ID3 frames.
+        manifest: Current manifest entries.
+        to_add: New Drive files to upload.
+
+    Returns:
+        Tuple of (updated manifest, added count, error count).
+    """
+    current = list(manifest)
+    added = errors = 0
+    for drive_file in to_add:
+        entry = _upload_file(drive_file, blob_store, drive_client, album)
+        if entry is not None:
+            current.append(entry)
+            blob_store.write_manifest(current)
+            added += 1
+        else:
+            errors += 1
+    return current, added, errors
+
+
+def _apply_updates(
+    blob_store: BlobStore,
+    drive_client: DriveClient,
+    album: str,
+    manifest: list[ManifestEntry],
+    to_update: list[tuple[DriveFile, ManifestEntry]],
+) -> tuple[list[ManifestEntry], int, int]:
+    """Re-upload changed files, committing the manifest after each one.
+
+    Args:
+        blob_store: Blob storage implementation.
+        drive_client: Drive API client.
+        album: Podcast name for ID3 frames.
+        manifest: Current manifest entries.
+        to_update: (DriveFile, ManifestEntry) pairs with changed content.
+
+    Returns:
+        Tuple of (updated manifest, updated count, error count).
+    """
+    current = list(manifest)
+    updated = errors = 0
+    for drive_file, old_entry in to_update:
+        new_entry = _reupload_file(
+            drive_file, old_entry, blob_store, drive_client, album
+        )
+        if new_entry is not None:
+            current = [
+                new_entry if e.drive_file_id == old_entry.drive_file_id else e
+                for e in current
+            ]
+            blob_store.write_manifest(current)
+            updated += 1
+        else:
+            errors += 1
+    return current, updated, errors
+
+
+def _apply_deletes(
+    blob_store: BlobStore,
+    manifest: list[ManifestEntry],
+    to_delete: list[ManifestEntry],
+) -> tuple[list[ManifestEntry], int, int]:
+    """Delete removed files, committing the manifest after each one.
+
+    Args:
+        blob_store: Blob storage implementation.
+        manifest: Current manifest entries.
+        to_delete: Manifest entries absent from Drive.
+
+    Returns:
+        Tuple of (updated manifest, deleted count, error count).
+    """
+    current = list(manifest)
+    deleted = errors = 0
+    for old_entry in to_delete:
+        if _delete_blob_entry(old_entry, blob_store):
+            current = [
+                e for e in current if e.drive_file_id != old_entry.drive_file_id
+            ]
+            blob_store.write_manifest(current)
+            deleted += 1
+        else:
+            errors += 1
+    return current, deleted, errors
 
 
 def compute_diff(
@@ -294,17 +358,13 @@ def _upload_file(
         New ManifestEntry on success, None on failure.
     """
     try:
-        raw = b"".join(drive_client.stream_file(drive_file.id))
         published_at = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
-        data, duration = ensure_id3_tags(
-            raw, drive_file.name, album, published_at[:4]
+        uploaded = _fetch_upload_payload(
+            drive_file, blob_store, drive_client, album, published_at[:4]
         )
-        blob_url = blob_store.upload(
-            _blob_path(drive_file),
-            data,
-            drive_file.mime_type,
-            cache_max_age=_EPISODE_CACHE_MAX_AGE,
-        )
+        if uploaded is None:
+            return None
+        blob_url, data, duration = uploaded
         return ManifestEntry(
             drive_file_id=drive_file.id,
             drive_md5=drive_file.md5,
@@ -345,16 +405,16 @@ def _reupload_file(
         Updated ManifestEntry on success, None on failure.
     """
     try:
-        raw = b"".join(drive_client.stream_file(drive_file.id))
-        data, duration = ensure_id3_tags(
-            raw, drive_file.name, album, old_entry.published_at[:4]
+        uploaded = _fetch_upload_payload(
+            drive_file,
+            blob_store,
+            drive_client,
+            album,
+            old_entry.published_at[:4],
         )
-        blob_url = blob_store.upload(
-            _blob_path(drive_file),
-            data,
-            drive_file.mime_type,
-            cache_max_age=_EPISODE_CACHE_MAX_AGE,
-        )
+        if uploaded is None:
+            return None
+        blob_url, data, duration = uploaded
         new_entry = replace(
             old_entry,
             drive_md5=drive_file.md5,
@@ -378,6 +438,41 @@ def _reupload_file(
         return new_entry
     except Exception as exc:
         _LOG.error("Failed to re-upload %s: %s", drive_file.name, exc)
+        return None
+
+
+def _fetch_upload_payload(
+    drive_file: DriveFile,
+    blob_store: BlobStore,
+    drive_client: DriveClient,
+    album: str,
+    year: str,
+) -> tuple[str, bytes, float | None] | None:
+    """Stream, tag, and upload one file, returning its upload outcome.
+
+    Args:
+        drive_file: Drive file metadata.
+        blob_store: Blob storage implementation.
+        drive_client: Drive API client for streaming content.
+        album: Podcast name for ID3 frames.
+        year: Four-digit year for the ID3 date frame.
+
+    Returns:
+        Tuple of (blob URL, served bytes, duration) on success,
+        None on any failure (already logged).
+    """
+    try:
+        raw = b"".join(drive_client.stream_file(drive_file.id))
+        data, duration = ensure_id3_tags(raw, drive_file.name, album, year)
+        blob_url = blob_store.upload(
+            _blob_path(drive_file),
+            data,
+            drive_file.mime_type,
+            cache_max_age=_EPISODE_CACHE_MAX_AGE,
+        )
+        return blob_url, data, duration
+    except Exception as exc:
+        _LOG.error("Failed to upload %s: %s", drive_file.name, exc)
         return None
 
 

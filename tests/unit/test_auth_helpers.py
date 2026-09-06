@@ -3,17 +3,17 @@
 from __future__ import annotations
 
 from podcast.web.auth_routes import _validate_state
-from podcast.web.middleware import _parse_allowed_emails
+from podcast.web.middleware import parse_allowed_emails
 
 
 def test_single_email_parsed() -> None:
     """Single email yields a one-element set."""
-    assert _parse_allowed_emails("a@b.com") == {"a@b.com"}
+    assert parse_allowed_emails("a@b.com") == {"a@b.com"}
 
 
 def test_multiple_emails_parsed() -> None:
     """Comma-separated pair yields both addresses."""
-    assert _parse_allowed_emails("a@b.com, c@d.com") == {
+    assert parse_allowed_emails("a@b.com, c@d.com") == {
         "a@b.com",
         "c@d.com",
     }
@@ -21,17 +21,17 @@ def test_multiple_emails_parsed() -> None:
 
 def test_whitespace_stripped() -> None:
     """Surrounding whitespace is stripped."""
-    assert _parse_allowed_emails("  a@b.com  ") == {"a@b.com"}
+    assert parse_allowed_emails("  a@b.com  ") == {"a@b.com"}
 
 
 def test_uppercase_normalized() -> None:
     """Uppercase addresses are lowercased."""
-    assert _parse_allowed_emails("A@B.COM") == {"a@b.com"}
+    assert parse_allowed_emails("A@B.COM") == {"a@b.com"}
 
 
 def test_empty_string_returns_empty_set() -> None:
     """Empty string yields an empty set."""
-    assert _parse_allowed_emails("") == set()
+    assert parse_allowed_emails("") == set()
 
 
 def _signed_state(state: str, key: str) -> str:

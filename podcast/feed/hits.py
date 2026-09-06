@@ -56,21 +56,31 @@ def record_feed_hit(
                 status=status,
             )
         )
-        payload = {
-            "entries": [
-                {
-                    "timestamp": h.timestamp,
-                    "user_agent": h.user_agent,
-                    "status": h.status,
-                }
-                for h in hits[-_MAX_HITS:]
-            ]
-        }
-        blob_store.write(
-            _HITS_PATH, json.dumps(payload).encode(), cache_max_age=60
-        )
+        blob_store.write(_HITS_PATH, _serialize_hits(hits), cache_max_age=60)
     except Exception as exc:
         _LOG.warning("Failed to record feed hit: %s", exc)
+
+
+def _serialize_hits(hits: list[FeedHit]) -> bytes:
+    """Serialise the newest hits to capped JSON bytes.
+
+    Args:
+        hits: Recorded hits, oldest first.
+
+    Returns:
+        UTF-8 JSON payload retaining at most _MAX_HITS entries.
+    """
+    payload = {
+        "entries": [
+            {
+                "timestamp": h.timestamp,
+                "user_agent": h.user_agent,
+                "status": h.status,
+            }
+            for h in hits[-_MAX_HITS:]
+        ]
+    }
+    return json.dumps(payload).encode()
 
 
 def read_feed_hits(blob_store: BlobStore) -> list[FeedHit]:

@@ -53,18 +53,31 @@ def ensure_id3_tags(
     if existing is not None and _frames_match(existing, desired):
         return data, duration
     try:
-        tag = mutagen.id3.ID3()
-        _apply_frames(tag, desired)
-        out = BytesIO()
-        tag.save(out, v1=0, v2_version=3)
-        v1_block = bytearray(bytes(mutagen.id3.MakeID3v1(tag)))
-        # Force genre 12 ("Other"): mutagen maps "Podcast" to an
-        # extended-table id most firmware genre tables don't contain.
-        v1_block[127] = 12
-        return out.getvalue() + _strip_id3v2(data) + bytes(v1_block), duration
+        return _build_tagged_bytes(data, desired), duration
     except Exception as exc:
         _LOG.warning("Skipping ID3 tagging (failed): %s", exc)
         return data, duration
+
+
+def _build_tagged_bytes(data: bytes, desired: dict[str, str]) -> bytes:
+    """Build fresh ID3v2.3 + v1 blocks around the audio frames.
+
+    Args:
+        data: Raw audio file bytes.
+        desired: Wanted frame texts from _desired_frames.
+
+    Returns:
+        Tag block + audio frames + v1 trailer.
+    """
+    tag = mutagen.id3.ID3()
+    _apply_frames(tag, desired)
+    out = BytesIO()
+    tag.save(out, v1=0, v2_version=3)
+    v1_block = bytearray(bytes(mutagen.id3.MakeID3v1(tag)))
+    # Force genre 12 ("Other"): mutagen maps "Podcast" to an
+    # extended-table id most firmware genre tables don't contain.
+    v1_block[127] = 12
+    return out.getvalue() + _strip_id3v2(data) + bytes(v1_block)
 
 
 def _desired_frames(

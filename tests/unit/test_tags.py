@@ -17,7 +17,7 @@ def _raw() -> bytes:
     return _FIXTURE.read_bytes()
 
 
-def _tags(data: bytes):
+def _tags(data: bytes) -> mutagen.FileType | None:
     """Load ID3 tags from bytes."""
     return mutagen.File(BytesIO(data))
 

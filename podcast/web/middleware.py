@@ -8,7 +8,7 @@ from podcast.auth.session import validate_session_cookie
 from podcast.config import Settings
 from podcast.deps import get_settings
 
-__all__ = ["require_login"]
+__all__ = ["parse_allowed_emails", "require_login"]
 
 
 def require_login(
@@ -39,13 +39,13 @@ def require_login(
             status_code=307,
             headers={"Location": "/auth/login"},
         )
-    allowed = _parse_allowed_emails(settings.allowed_emails)
+    allowed = parse_allowed_emails(settings.allowed_emails)
     if email not in allowed:
         raise HTTPException(status_code=403, detail="Email not authorized")
     return email
 
 
-def _parse_allowed_emails(raw: str) -> set[str]:
+def parse_allowed_emails(raw: str) -> set[str]:
     """Parse a comma-separated list of allowed emails.
 
     Args:

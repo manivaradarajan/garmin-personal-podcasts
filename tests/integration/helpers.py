@@ -24,7 +24,7 @@ def make_settings(**overrides: object) -> Settings:
         "session_secret_key": "test-secret-key-32-bytes-exactly!!",
     }
     base.update(overrides)
-    return Settings(**base)  # type: ignore[arg-type]
+    return Settings.model_validate(base)
 
 
 def make_store() -> InMemoryBlobStore:

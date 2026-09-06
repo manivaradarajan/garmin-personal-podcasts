@@ -4,7 +4,7 @@ Google Drive → Vercel Blob sync with a private podcast RSS feed, built to
 get personal audio onto a Garmin watch via [PlayRun](https://www.playrun.app/).
 
 ```
-Google Drive → (hourly sync) → Vercel Blob → RSS feed → PlayRun → Garmin watch
+Google Drive → (daily sync) → Vercel Blob → RSS feed → PlayRun → Garmin watch
 ```
 
 ## How it works
@@ -13,7 +13,7 @@ Google Drive → (hourly sync) → Vercel Blob → RSS feed → PlayRun → Garm
   via Service Account, diffs against a `manifest.json` in Blob storage, and
   incrementally uploads/deletes — resumable after timeouts, abort-on-partial
   Drive listings so files are never falsely deleted.
-- `GET /api/feed?token=SECRET` serves RSS 2.0 with `<enclosure>` tags pointing
+- `GET /api/podcast?token=SECRET` serves RSS 2.0 with `<enclosure>` tags pointing
   at Blob URLs. PlayRun fetches once per episode and syncs to the watch.
 - A Google-OAuth-gated dashboard shows storage usage, the feed URL, per-file
   audio players, a manual sync trigger, and alerts for files the Garmin can't

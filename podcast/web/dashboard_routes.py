@@ -14,6 +14,7 @@ from podcast.config import Settings
 from podcast.deps import get_blob_store, get_drive_client, get_settings
 from podcast.drive.client import DriveClient, DriveListError
 from podcast.feed.hits import read_feed_hits
+from podcast.models import ManifestEntry
 from podcast.sync.engine import compute_diff, is_sync_locked
 from podcast.web.middleware import require_login
 
@@ -50,38 +51,12 @@ async def dashboard(
         Rendered dashboard HTML response.
     """
     entries = blob_store.read_manifest()
-
-    total_bytes = sum(e.size_bytes for e in entries)
-    quota_bytes = settings.blob_quota_mb * 1024 * 1024
-    if quota_bytes:
-        usage_pct = min(100, round(total_bytes / quota_bytes * 100, 1))
-    else:
-        usage_pct = 0
-
+    total_bytes, quota_bytes, usage_pct = _storage_usage(
+        entries, settings.blob_quota_mb
+    )
     is_syncing = is_sync_locked(blob_store)
-
-    # Live Drive comparison so the dashboard shows pending changes
-    # instead of silently stale state. Drive failures degrade to
-    # last-synced state rather than a 500.
-    try:
-        drive_files = drive_client.list_audio_files()
-        to_add, to_update, to_delete, _ = compute_diff(drive_files, entries)
-        pending = {
-            "add": len(to_add),
-            "update": len(to_update),
-            "delete": len(to_delete),
-        }
-        drive_ok = True
-    except DriveListError:
-        pending = {"add": 0, "update": 0, "delete": 0}
-        drive_ok = False
-
-    incompatible = [
-        (entry.name, reason)
-        for entry in entries
-        if (reason := check_compatibility(entry)) is not None
-    ]
-
+    pending, drive_ok = _pending_changes(drive_client, entries)
+    incompatible = _incompatible_entries(entries)
     feed_url = (
         f"{settings.podcast_base_url}/api/podcast"
         f"?token={settings.feed_secret_token}"
@@ -110,3 +85,71 @@ async def dashboard(
             "flash": flash,
         },
     )
+
+
+def _storage_usage(
+    entries: list[ManifestEntry], quota_mb: int
+) -> tuple[int, int, float]:
+    """Compute storage totals and usage percentage.
+
+    Args:
+        entries: Manifest entries representing synced files.
+        quota_mb: Blob storage quota in megabytes.
+
+    Returns:
+        Tuple of (total bytes, quota bytes, usage percent capped at 100).
+    """
+    total_bytes = sum(e.size_bytes for e in entries)
+    quota_bytes = quota_mb * 1024 * 1024
+    if quota_bytes:
+        usage_pct = min(100, round(total_bytes / quota_bytes * 100, 1))
+    else:
+        usage_pct = 0
+    return total_bytes, quota_bytes, usage_pct
+
+
+def _pending_changes(
+    drive_client: DriveClient, entries: list[ManifestEntry]
+) -> tuple[dict[str, int], bool]:
+    """Compare live Drive state against the manifest.
+
+    Drive failures degrade to last-synced state rather than raising.
+
+    Args:
+        drive_client: Drive API client.
+        entries: Current manifest entries.
+
+    Returns:
+        Tuple of (pending add/update/delete counts, drive reachable).
+    """
+    try:
+        drive_files = drive_client.list_audio_files()
+    except DriveListError:
+        return {"add": 0, "update": 0, "delete": 0}, False
+    to_add, to_update, to_delete, _ = compute_diff(drive_files, entries)
+    return (
+        {
+            "add": len(to_add),
+            "update": len(to_update),
+            "delete": len(to_delete),
+        },
+        True,
+    )
+
+
+def _incompatible_entries(
+    entries: list[ManifestEntry],
+) -> list[tuple[str, str]]:
+    """List entries unlikely to play on a Garmin watch.
+
+    Args:
+        entries: Manifest entries representing synced files.
+
+    Returns:
+        List of (filename, reason) pairs for incompatible entries.
+    """
+    return [
+        (entry.name, reason)
+        for entry in entries
+        if (reason := check_compatibility(entry)) is not None
+    ]
