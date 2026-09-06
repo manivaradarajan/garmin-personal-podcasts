@@ -95,3 +95,51 @@ def test_partial_tags_are_upgraded() -> None:
     frames = mutagen.File(BytesIO(upgraded))
     assert "TRCK" in frames.tags and "TLEN" in frames.tags
     assert frames["TIT2"].text == ["T"]
+
+
+def test_injected_frames_are_latin1() -> None:
+    """Injected ASCII frames use Latin-1, the Garmin-readable encoding."""
+    from mutagen.id3 import Encoding
+
+    out, _ = ensure_id3_tags(_raw(), "My Episode", "My Cast")
+    tags = mutagen.File(BytesIO(out))
+    for frame in ("TIT2", "TPE1", "TALB", "TCON", "TRCK", "TLEN"):
+        assert tags[frame].encoding == Encoding.LATIN1, frame
+
+
+def test_non_ascii_title_falls_back_to_utf16() -> None:
+    """Non-Latin-1 text falls back to UTF-16 instead of failing."""
+    from mutagen.id3 import Encoding
+
+    out, _ = ensure_id3_tags(_raw(), "Épisode α", "My Cast")
+    assert out[:3] == b"ID3"
+    assert mutagen.File(BytesIO(out))["TIT2"].encoding == Encoding.UTF16
+
+
+def test_id3v1_trailer_present() -> None:
+    """Tagged output ends with an ID3v1 trailer for old parsers."""
+    out, _ = ensure_id3_tags(_raw(), "My Episode", "My Cast")
+    assert out[-128:-125] == b"TAG"
+
+
+def test_utf16_input_upgrades_to_latin1() -> None:
+    """UTF-16-framed input is rebuilt with Latin-1 frames."""
+    from mutagen.id3 import ID3, Encoding
+
+    tag = ID3()
+    tag["TIT2"] = mutagen.id3.TIT2(encoding=1, text="T")
+    tag["TRCK"] = mutagen.id3.TRCK(encoding=1, text="1")
+    tag["TLEN"] = mutagen.id3.TLEN(encoding=1, text="1000")
+    buf = BytesIO()
+    tag.save(buf, v1=0, v2_version=3)
+    partial = buf.getvalue() + _raw()[_raw().find(b"\xff\xfb") :]
+    assert mutagen.File(BytesIO(partial))["TIT2"].encoding == Encoding.UTF16
+
+    upgraded, _ = ensure_id3_tags(partial, "T", "A")
+    assert mutagen.File(BytesIO(upgraded))["TIT2"].encoding == Encoding.LATIN1
+
+
+def test_latin1_complete_file_passes_through() -> None:
+    """Complete Latin-1 tag set returns byte-identical (preserve path)."""
+    out, _ = ensure_id3_tags(_raw(), "My Episode", "My Cast")
+    assert ensure_id3_tags(out, "My Episode", "My Cast")[0] == out
