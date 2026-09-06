@@ -228,3 +228,30 @@ def test_untagged_passthrough_records_tagged_false() -> None:
     )
     (entry,) = store.read_manifest()
     assert entry.tagged is False
+
+
+def test_pretagged_mp3_records_tagged_true_untouched() -> None:
+    """Pre-tagged MP3 keeps its bytes and records tagged=True."""
+    from pathlib import Path
+
+    from podcast.audio.tags import ensure_id3_tags
+
+    raw = (
+        Path(__file__).parent.parent / "fixtures" / "untagged.mp3"
+    ).read_bytes()
+    tagged = ensure_id3_tags(raw, "Song", "Cast")
+
+    class _TaggedDrive(_StubDrive):
+        def stream_file(self, file_id: str):
+            yield tagged
+
+    store = InMemoryBlobStore()
+    result = run_sync(
+        _StubSettings(),  # type: ignore[arg-type]
+        store,
+        _TaggedDrive([_drive("song")]),  # type: ignore[arg-type]
+    )
+    assert result.added == 1
+    (entry,) = store.read_manifest()
+    assert entry.tagged is True
+    assert store._blobs["song.mp3"] == tagged

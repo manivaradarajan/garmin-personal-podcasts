@@ -48,3 +48,19 @@ def test_non_audio_bytes_pass_through() -> None:
     """Non-MP3 bytes are returned unchanged."""
     assert ensure_id3_tags(b"not audio at all", "T", "A") == b"not audio at all"
     assert ensure_id3_tags(b"", "T", "A") == b""
+
+
+def test_has_id3_title_detects_presence() -> None:
+    """has_id3_title is False before tagging, True after."""
+    from podcast.audio.tags import has_id3_title
+
+    assert has_id3_title(_raw()) is False
+    assert has_id3_title(ensure_id3_tags(_raw(), "T", "A")) is True
+
+
+def test_has_id3_title_rejects_non_audio() -> None:
+    """has_id3_title is False for non-audio and empty bytes."""
+    from podcast.audio.tags import has_id3_title
+
+    assert has_id3_title(b"not audio") is False
+    assert has_id3_title(b"") is False

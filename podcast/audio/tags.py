@@ -10,7 +10,7 @@ import mutagen
 import mutagen.id3
 import mutagen.mp3
 
-__all__ = ["ensure_id3_tags"]
+__all__ = ["ensure_id3_tags", "has_id3_title"]
 
 _LOG = logging.getLogger(__name__)
 
@@ -56,6 +56,23 @@ def ensure_id3_tags(data: bytes, title: str, album: str) -> bytes:
     except Exception as exc:
         _LOG.warning("Skipping ID3 tagging (failed): %s", exc)
         return data
+
+
+def has_id3_title(data: bytes) -> bool:
+    """Return True if the bytes carry an ID3 title tag.
+
+    Args:
+        data: Raw audio file bytes to inspect.
+
+    Returns:
+        True when a TIT2 frame is present, False otherwise (including
+        for unparseable content).
+    """
+    try:
+        audio = mutagen.File(BytesIO(data))
+    except Exception:
+        return False
+    return audio is not None and audio.tags is not None and "TIT2" in audio.tags
 
 
 def _looks_like_mp3(data: bytes) -> bool:
