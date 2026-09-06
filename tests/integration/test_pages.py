@@ -6,14 +6,29 @@ from fastapi.testclient import TestClient
 
 from app import app
 from podcast.auth.session import create_session_cookie
-from podcast.deps import get_blob_store, get_settings
+from podcast.deps import get_blob_store, get_drive_client, get_settings
+from podcast.drive.client import DriveListError
+from podcast.models import DriveFile
 from tests.integration.helpers import make_settings, make_store
 
 
-def _client(settings, store, authed: bool = False) -> TestClient:
+class _StubDrive:
+    """Drive stub returning canned files for dashboard tests."""
+
+    def __init__(self, files: list[DriveFile] | None = None) -> None:
+        """Store canned files (defaults to empty listing)."""
+        self._files = files or []
+
+    def list_audio_files(self) -> list[DriveFile]:
+        """Return canned files."""
+        return list(self._files)
+
+
+def _client(settings, store, authed: bool = False, drive=None) -> TestClient:
     """Build a TestClient with overrides, optionally with a session."""
     app.dependency_overrides[get_settings] = lambda: settings
     app.dependency_overrides[get_blob_store] = lambda: store
+    app.dependency_overrides[get_drive_client] = lambda: drive or _StubDrive()
     client = TestClient(app, raise_server_exceptions=False)
     if authed:
         cookie = create_session_cookie("a@b.com", settings.session_secret_key)
@@ -148,3 +163,86 @@ def test_login_google_uses_configured_base_url(monkeypatch) -> None:
         app.dependency_overrides.clear()
     assert resp.status_code == 307
     assert captured["redirect_uri"] == "http://localhost:4000/auth/callback"
+
+
+def test_dashboard_shows_up_to_date_when_no_changes(
+    sample_manifest_entry,
+) -> None:
+    """Matching Drive and manifest render the up-to-date status."""
+    from podcast.models import DriveFile as _DriveFile
+
+    settings = make_settings()
+    store = make_store()
+    store.write_manifest([sample_manifest_entry])
+    drive = _StubDrive(
+        [
+            _DriveFile(
+                id="drive-id-1",
+                name="ep1.mp3",
+                mime_type="audio/mpeg",
+                size_bytes=1_000_000,
+                md5="abc123",
+            )
+        ]
+    )
+    client = _client(settings, store, authed=True, drive=drive)
+    try:
+        resp = client.get("/")
+    finally:
+        app.dependency_overrides.clear()
+    assert resp.status_code == 200
+    assert "Up to date with Google Drive" in resp.text
+
+
+def test_dashboard_shows_pending_counts(sample_manifest_entry) -> None:
+    """Extra Drive file renders pending new-file status."""
+    settings = make_settings()
+    store = make_store()
+    store.write_manifest([sample_manifest_entry])
+    drive = _StubDrive(
+        [
+            DriveFile(
+                id="drive-id-1",
+                name="ep1.mp3",
+                mime_type="audio/mpeg",
+                size_bytes=1_000_000,
+                md5="abc123",
+            ),
+            DriveFile(
+                id="drive-id-2",
+                name="ep2.mp3",
+                mime_type="audio/mpeg",
+                size_bytes=2_000_000,
+                md5="def456",
+            ),
+        ]
+    )
+    client = _client(settings, store, authed=True, drive=drive)
+    try:
+        resp = client.get("/")
+    finally:
+        app.dependency_overrides.clear()
+    assert resp.status_code == 200
+    assert "1 new" in resp.text
+
+
+def test_dashboard_degrades_when_drive_unreachable(
+    sample_manifest_entry,
+) -> None:
+    """Drive failure still renders the dashboard with a warning."""
+
+    class _BrokenDrive:
+        def list_audio_files(self):
+            raise DriveListError("down")
+
+    settings = make_settings()
+    store = make_store()
+    store.write_manifest([sample_manifest_entry])
+    client = _client(settings, store, authed=True, drive=_BrokenDrive())
+    try:
+        resp = client.get("/")
+    finally:
+        app.dependency_overrides.clear()
+    assert resp.status_code == 200
+    assert "Couldn" in resp.text
+    assert "ep1.mp3" in resp.text

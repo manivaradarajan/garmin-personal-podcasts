@@ -63,6 +63,10 @@ tr:last-child td { border-bottom: none; }
 .time-label { font-size: .75rem; color: #6b7280; white-space: nowrap; }
 .empty-state { text-align: center; padding: 3rem 1rem; color: #9ca3af; }
 .sync-header { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: .5rem; }
+.sync-status { font-size: .85rem; margin-top: .75rem; }
+.sync-status.ok { color: #15803d; }
+.sync-status.pending { color: #92400e; font-weight: 600; }
+.sync-status.warn { color: #b45309; }
 .flash { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
 .flash-close { color: #065f46; font-size: 1.25rem; font-weight: 700; line-height: 1; text-decoration: none; }
 .flash-close:hover { color: #047857; }
@@ -129,8 +133,15 @@ tr:last-child td { border-bottom: none; }
     </div>
   </div>
   <p style="font-size:.8rem;color:#9ca3af;margin-top:.5rem">
-    Cron runs hourly. Manual trigger shares the same lock.
+    Cron runs daily. Manual trigger shares the same lock.
   </p>
+  {% if not drive_ok %}
+  <p class="sync-status warn">⚠️ Couldn't reach Google Drive — showing last synced state.</p>
+  {% elif pending["add"] or pending["update"] or pending["delete"] %}
+  <p class="sync-status pending">{{ pending["add"] + pending["update"] + pending["delete"] }} change(s) pending — {{ pending["add"] }} new, {{ pending["update"] }} updated, {{ pending["delete"] }} removed. Press Sync Now.</p>
+  {% else %}
+  <p class="sync-status ok">✓ Up to date with Google Drive.</p>
+  {% endif %}
 </div>
 
 <!-- File table -->
@@ -182,7 +193,7 @@ tr:last-child td { border-bottom: none; }
   <div class="empty-state">
     <p>No episodes synced yet.</p>
     <p style="margin-top:.5rem;font-size:.85rem">
-      Trigger a sync or wait for the hourly cron job.
+      Trigger a sync or wait for the daily cron job.
     </p>
   </div>
   {% endif %}
