@@ -165,3 +165,49 @@ def test_v1_genre_byte_is_other() -> None:
     """v1 trailer genre is 12 (Other), safe for old firmware tables."""
     out, _ = ensure_id3_tags(_raw(), "T", "A", "2026")
     assert out[-1] == 12
+
+
+def test_show_frames_normalized_episode_frames_kept() -> None:
+    """Creator show frames are overwritten; episode frames preserved."""
+    import mutagen.id3
+
+    tag = mutagen.id3.ID3()
+    tag["TIT2"] = mutagen.id3.TIT2(encoding=0, text="Creator Title")
+    tag["TPE1"] = mutagen.id3.TPE1(encoding=0, text="Artist")
+    tag["TALB"] = mutagen.id3.TALB(encoding=0, text="Album")
+    tag["TCON"] = mutagen.id3.TCON(encoding=0, text="genre")
+    tag["TRCK"] = mutagen.id3.TRCK(encoding=0, text="3")
+    tag["TLEN"] = mutagen.id3.TLEN(encoding=0, text="1000")
+    buf = BytesIO()
+    tag.save(buf, v1=0, v2_version=3)
+    creator = buf.getvalue() + _raw()[_raw().find(b"\xff\xfb") :]
+
+    out, _ = ensure_id3_tags(creator, "file.mp3", "My Cast", "2026")
+    frames = mutagen.File(BytesIO(out))
+    assert frames["TIT2"].text == ["Creator Title"]
+    assert frames["TRCK"].text == ["3"]
+    assert frames["TPE1"].text == ["My Cast"]
+    assert frames["TALB"].text == ["My Cast"]
+    assert frames["TCON"].text == ["Podcast"]
+
+
+def test_normalized_output_is_stable() -> None:
+    """A normalized file passes through byte-identical."""
+    import mutagen.id3
+
+    duration_ms = str(int(mutagen.File(BytesIO(_raw())).info.length * 1000))
+    tag = mutagen.id3.ID3()
+    tag["TIT2"] = mutagen.id3.TIT2(encoding=0, text="Creator Title")
+    tag["TPE1"] = mutagen.id3.TPE1(encoding=0, text="My Cast")
+    tag["TALB"] = mutagen.id3.TALB(encoding=0, text="My Cast")
+    tag["TCON"] = mutagen.id3.TCON(encoding=0, text="Podcast")
+    tag["TRCK"] = mutagen.id3.TRCK(encoding=0, text="3")
+    tag["TLEN"] = mutagen.id3.TLEN(encoding=0, text=duration_ms)
+    tag["TDRC"] = mutagen.id3.TDRC(encoding=0, text="2026")
+    buf = BytesIO()
+    tag.save(buf, v1=0, v2_version=3)
+    complete = buf.getvalue() + _raw()[_raw().find(b"\xff\xfb") :]
+
+    assert (
+        ensure_id3_tags(complete, "file.mp3", "My Cast", "2026")[0] == complete
+    )

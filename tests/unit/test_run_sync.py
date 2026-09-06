@@ -241,7 +241,10 @@ def test_pretagged_mp3_records_tagged_true_untouched() -> None:
     raw = (
         Path(__file__).parent.parent / "fixtures" / "untagged.mp3"
     ).read_bytes()
-    tagged, _ = ensure_id3_tags(raw, "Song", "Cast")
+    from datetime import UTC, datetime
+
+    year = str(datetime.now(UTC).year)
+    tagged, _ = ensure_id3_tags(raw, "song", "Test Cast", year)
 
     class _TaggedDrive(_StubDrive):
         def stream_file(self, file_id: str):

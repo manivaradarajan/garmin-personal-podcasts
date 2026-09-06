@@ -18,20 +18,20 @@ _LOG = logging.getLogger(__name__)
 def ensure_id3_tags(
     data: bytes, title: str, album: str, year: str | None = None
 ) -> tuple[bytes, float | None]:
-    """Prepend minimal ID3v2.3 tags to an untagged MP3.
+    """Normalise ID3v2.3 tags so episodes group as one podcast.
 
-    Garmin watches need ID3 metadata to list and categorise episodes;
-    tagless files may merge into one entry or not display at all. The
-    injected set mirrors what working podcast files carry: title,
-    artist, album, genre, track number, length, and recording year.
-    Files that already carry a complete tag set, and all non-MP3
-    content, pass through byte-identical.
+    Show-level frames (artist, album, genre) are always set to the
+    podcast values so every episode groups under one show on the
+    watch. Episode-level frames (title, track, date, length) keep
+    creator values when present and are filled in otherwise. Files
+    already matching the desired set, and all non-MP3 content, pass
+    through byte-identical.
 
     Args:
         data: Raw audio file bytes.
-        title: Episode title (filename without extension).
-        album: Podcast/album name for the TALB frame.
-        year: Four-digit year for the TDRC frame, if known.
+        title: Episode title fallback (filename without extension).
+        album: Podcast name for artist/album frames.
+        year: Four-digit year fallback for the TDRC frame, if known.
 
     Returns:
         Tuple of (possibly tagged bytes, audio duration in seconds or
@@ -48,33 +48,13 @@ def ensure_id3_tags(
     if audio is None or not isinstance(audio, mutagen.mp3.MP3):
         return data, None
     duration = _duration_sec(audio)
-    if audio.tags is not None and _tags_complete(audio.tags):
+    existing = audio.tags
+    desired = _desired_frames(existing, Path(title).stem, album, year, duration)
+    if existing is not None and _frames_match(existing, desired):
         return data, duration
     try:
         tag = mutagen.id3.ID3()
-        stem = Path(title).stem
-        tag["TIT2"] = mutagen.id3.TIT2(
-            encoding=_frame_encoding(stem), text=stem
-        )
-        tag["TPE1"] = mutagen.id3.TPE1(
-            encoding=_frame_encoding(album), text=album
-        )
-        tag["TALB"] = mutagen.id3.TALB(
-            encoding=_frame_encoding(album), text=album
-        )
-        tag["TCON"] = mutagen.id3.TCON(
-            encoding=_frame_encoding("Podcast"), text="Podcast"
-        )
-        tag["TRCK"] = mutagen.id3.TRCK(encoding=_frame_encoding("1"), text="1")
-        if duration is not None:
-            length_ms = str(int(duration * 1000))
-            tag["TLEN"] = mutagen.id3.TLEN(
-                encoding=_frame_encoding(length_ms), text=length_ms
-            )
-        if year is not None:
-            tag["TDRC"] = mutagen.id3.TDRC(
-                encoding=_frame_encoding(year), text=year
-            )
+        _apply_frames(tag, desired)
         out = BytesIO()
         tag.save(out, v1=0, v2_version=3)
         v1_block = bytearray(bytes(mutagen.id3.MakeID3v1(tag)))
@@ -85,6 +65,89 @@ def ensure_id3_tags(
     except Exception as exc:
         _LOG.warning("Skipping ID3 tagging (failed): %s", exc)
         return data, duration
+
+
+def _desired_frames(
+    existing: mutagen.id3.ID3 | None,
+    stem: str,
+    album: str,
+    year: str | None,
+    duration: float | None,
+) -> dict[str, str]:
+    """Compute the wanted frame texts, preserving episode-level values.
+
+    Args:
+        existing: Current tag set, if any.
+        stem: Episode title fallback.
+        album: Podcast name for show-level frames.
+        year: Year fallback for the date frame.
+        duration: Audio duration in seconds, if known.
+
+    Returns:
+        Mapping of frame ID to desired text.
+    """
+
+    def _keep(frame: str, fallback: str | None) -> str | None:
+        if existing is not None and frame in existing:
+            return str(existing[frame].text[0])
+        return fallback
+
+    desired: dict[str, str | None] = {
+        "TIT2": _keep("TIT2", stem),
+        "TPE1": album,
+        "TALB": album,
+        "TCON": "Podcast",
+        "TRCK": _keep("TRCK", "1"),
+        "TDRC": _keep("TDRC", year),
+        "TLEN": (
+            str(int(duration * 1000))
+            if duration is not None
+            else _keep("TLEN", None)
+        ),
+    }
+    return {k: v for k, v in desired.items() if v is not None}
+
+
+def _frames_match(existing: mutagen.id3.ID3, desired: dict[str, str]) -> bool:
+    """Return True if existing frames already equal the desired set.
+
+    Args:
+        existing: Current tag set.
+        desired: Wanted frame texts from _desired_frames.
+
+    Returns:
+        True when every desired frame is present with equal Latin-1
+        text, meaning a rebuild would be byte-equivalent.
+    """
+    for frame, text in desired.items():
+        current = existing.get(frame)
+        if current is None:
+            return False
+        if str(current.text[0]) != text:
+            return False
+        if getattr(current, "encoding", 0) != _frame_encoding(text):
+            return False
+    return True
+
+
+def _apply_frames(tag: mutagen.id3.ID3, desired: dict[str, str]) -> None:
+    """Populate a fresh ID3 tag with the desired frames.
+
+    Args:
+        tag: Empty ID3 tag to populate.
+        desired: Wanted frame texts from _desired_frames.
+    """
+    makers = {
+        "TIT2": mutagen.id3.TIT2,
+        "TPE1": mutagen.id3.TPE1,
+        "TALB": mutagen.id3.TALB,
+        "TCON": mutagen.id3.TCON,
+        "TRCK": mutagen.id3.TRCK,
+        "TLEN": mutagen.id3.TLEN,
+        "TDRC": mutagen.id3.TDRC,
+    }
+    for frame, text in desired.items():
+        tag[frame] = makers[frame](encoding=_frame_encoding(text), text=text)
 
 
 def _frame_encoding(text: str) -> int:
@@ -105,28 +168,6 @@ def _frame_encoding(text: str) -> int:
     except UnicodeEncodeError:
         return 1
     return 0
-
-
-def _tags_complete(tags: mutagen.id3.ID3) -> bool:
-    """Return True if tags need no upgrade.
-
-    Complete means the required frames are present and every text
-    frame among them is Latin-1 encoded (the Garmin-readable form).
-
-    Args:
-        tags: Parsed ID3 tag set.
-
-    Returns:
-        True when tagging can be skipped.
-    """
-    for frame in ("TIT2", "TRCK", "TLEN"):
-        if frame not in tags:
-            return False
-    for frame in ("TIT2", "TPE1", "TALB", "TCON", "TRCK", "TLEN"):
-        existing = tags.get(frame)
-        if existing is not None and getattr(existing, "encoding", 0) != 0:
-            return False
-    return True
 
 
 def _duration_sec(audio: mutagen.mp3.MP3) -> float | None:
