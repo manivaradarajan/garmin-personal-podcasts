@@ -44,11 +44,13 @@ class VercelBlobStore:
     ) -> str:
         """Upload data to Vercel Blob and return the public URL.
 
-        Each call creates a new versioned blob (addRandomSuffix=True) so that
-        concurrent readers are never served a partially-written object.
+        Uploads overwrite in place at a stable path (no random suffix)
+        so enclosure URLs never change across re-uploads — downstream
+        clients cache episode URLs aggressively. PUTs are atomic, so
+        readers see the old or new object, never a mix.
 
         Args:
-            path: Destination filename within the store.
+            path: Destination path within the store (stable per file).
             data: File content as bytes or a bytes iterator.
             mime_type: MIME type of the uploaded content.
             cache_max_age: Cache-Control max-age in seconds.
@@ -70,7 +72,8 @@ class VercelBlobStore:
                 "token": self._token,
                 "cacheControlMaxAge": str(cache_max_age),
                 "access": "public",
-                "addRandomSuffix": "true",
+                "addRandomSuffix": "false",
+                "allowOverwrite": "true",
             },
         )
         return result["url"]

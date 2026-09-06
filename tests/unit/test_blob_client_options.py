@@ -21,7 +21,8 @@ def test_upload_sends_string_options(monkeypatch) -> None:
     assert url == "https://blob.test/ep.mp3"
     options = captured["options"]
     assert options["cacheControlMaxAge"] == "86400"
-    assert options["addRandomSuffix"] == "true"
+    assert options["addRandomSuffix"] == "false"
+    assert options["allowOverwrite"] == "true"
     assert all(isinstance(v, str) for v in options.values())
 
 

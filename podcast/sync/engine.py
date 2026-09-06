@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 from dataclasses import replace
 from datetime import UTC, datetime
+from pathlib import Path
 
 from podcast.audio.tags import ensure_id3_tags, has_id3_title
 from podcast.blob.protocol import BlobStore
@@ -23,6 +24,24 @@ __all__ = [
 _LOG = logging.getLogger(__name__)
 _LOCK_PATH = "sync.lock"
 _LOCK_MAX_AGE_SECONDS = 300  # 5 minutes
+_EPISODES_PREFIX = "episodes"
+_EPISODE_CACHE_MAX_AGE = 300  # 5 minutes; bounds stale bytes after overwrite
+
+
+def _blob_path(drive_file: DriveFile) -> str:
+    """Return the stable Blob path for a Drive file.
+
+    Derived from the Drive file ID (not the filename) so renames and
+    re-uploads keep the same enclosure URL forever.
+
+    Args:
+        drive_file: Drive file metadata.
+
+    Returns:
+        Stable pathname preserving the original extension.
+    """
+    suffix = Path(drive_file.name).suffix.lower() or ".mp3"
+    return f"{_EPISODES_PREFIX}/{drive_file.id}{suffix}"
 
 
 class LockHeldError(Exception):
@@ -274,7 +293,10 @@ def _upload_file(
         raw = b"".join(drive_client.stream_file(drive_file.id))
         data, duration = ensure_id3_tags(raw, drive_file.name, album)
         blob_url = blob_store.upload(
-            drive_file.name, data, drive_file.mime_type, cache_max_age=86400
+            _blob_path(drive_file),
+            data,
+            drive_file.mime_type,
+            cache_max_age=_EPISODE_CACHE_MAX_AGE,
         )
         return ManifestEntry(
             drive_file_id=drive_file.id,
@@ -318,7 +340,10 @@ def _reupload_file(
         raw = b"".join(drive_client.stream_file(drive_file.id))
         data, duration = ensure_id3_tags(raw, drive_file.name, album)
         blob_url = blob_store.upload(
-            drive_file.name, data, drive_file.mime_type, cache_max_age=86400
+            _blob_path(drive_file),
+            data,
+            drive_file.mime_type,
+            cache_max_age=_EPISODE_CACHE_MAX_AGE,
         )
         new_entry = replace(
             old_entry,

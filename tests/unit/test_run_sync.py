@@ -213,8 +213,8 @@ def test_mp3_upload_is_tagged_and_sized() -> None:
     assert result.added == 1
     (entry,) = store.read_manifest()
     assert entry.size_bytes > len(raw)
-    assert entry.size_bytes == len(store._blobs["song.mp3"])
-    assert store._blobs["song.mp3"][:3] == b"ID3"
+    assert entry.size_bytes == len(store._blobs["episodes/song.mp3"])
+    assert store._blobs["episodes/song.mp3"][:3] == b"ID3"
     assert entry.tagged is True
     assert entry.duration_sec is not None and entry.duration_sec > 0
 
@@ -256,4 +256,36 @@ def test_pretagged_mp3_records_tagged_true_untouched() -> None:
     assert result.added == 1
     (entry,) = store.read_manifest()
     assert entry.tagged is True
-    assert store._blobs["song.mp3"] == tagged
+    assert store._blobs["episodes/song.mp3"] == tagged
+
+
+def test_reupload_keeps_stable_blob_url() -> None:
+    """Changed content re-uploads to the same URL (no URL churn)."""
+    from podcast.sync.engine import _blob_path
+
+    store = InMemoryBlobStore()
+    drive = _StubDrive([_drive("song")])
+    run_sync(
+        _StubSettings(),  # type: ignore[arg-type]
+        store,
+        drive,  # type: ignore[arg-type]
+    )
+    (before,) = store.read_manifest()
+    assert before.blob_url == f"https://blob.test/{_blob_path(_drive('song'))}"
+
+    drive._files = [_drive("song", md5="changed")]
+    result = run_sync(
+        _StubSettings(),  # type: ignore[arg-type]
+        store,
+        drive,  # type: ignore[arg-type]
+    )
+    assert result.updated == 1
+    (after,) = store.read_manifest()
+    assert after.blob_url == before.blob_url
+
+
+def test_blob_path_uses_id_not_filename() -> None:
+    """Stable paths derive from Drive ID, preserving the extension."""
+    from podcast.sync.engine import _blob_path
+
+    assert _blob_path(_drive("abc123")) == "episodes/abc123.mp3"
