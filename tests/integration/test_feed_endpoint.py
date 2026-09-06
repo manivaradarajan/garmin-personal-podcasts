@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import xml.etree.ElementTree as ET
+
 from fastapi.testclient import TestClient
 
 from app import app
@@ -147,3 +149,27 @@ def test_feed_self_link_uses_configured_base_url(sample_manifest_entry) -> None:
     assert (
         'href="https://canonical.test/api/feed?token=feed-secret"' in resp.text
     )
+
+
+def test_feed_contains_guid_and_locked(sample_manifest_entry) -> None:
+    """Live feed carries deterministic guid and owner lock."""
+    settings = make_settings()
+    store = make_store()
+    store.write_manifest([sample_manifest_entry])
+    client = _client(settings, store)
+    try:
+        first = client.get("/api/feed", params={"token": "feed-secret"})
+        second = client.get("/api/feed", params={"token": "feed-secret"})
+    finally:
+        app.dependency_overrides.clear()
+    assert first.status_code == 200
+    ns = "{https://podcastindex.org/namespace/1.0}"
+    channel = ET.fromstring(first.text).find("channel")
+    assert channel is not None
+    assert channel.find(f"{ns}guid") is not None
+    assert channel.find(f"{ns}locked").get("owner") == "a@b.com"
+    first_guid = channel.find(f"{ns}guid").text
+    second_guid = (
+        ET.fromstring(second.text).find("channel").find(f"{ns}guid").text
+    )
+    assert first_guid == second_guid

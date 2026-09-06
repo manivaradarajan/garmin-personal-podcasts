@@ -12,6 +12,7 @@ from podcast.models import ManifestEntry
 __all__ = ["build_rss_xml", "canonical_mime_type", "default_description"]
 
 _ITUNES_NS = "http://www.itunes.com/dtds/podcast-1.0.dtd"
+_PODCAST_NS = "https://podcastindex.org/namespace/1.0"
 _ITUNES_CATEGORY = "Education"
 
 # Drive reports some MIME types that are not registered IANA types
@@ -43,6 +44,8 @@ def build_rss_xml(
     feed_url: str,
     base_url: str,
     description: str | None = None,
+    owner_email: str | None = None,
+    podcast_guid: str | None = None,
 ) -> str:
     """Build an RSS 2.0 feed XML string from manifest entries.
 
@@ -58,11 +61,21 @@ def build_rss_xml(
         base_url: Base URL of the application.
         description: Channel description; falls back to a generated one
             long enough for validator minimums.
+        owner_email: Owner address for podcast:locked; omitted when None.
+        podcast_guid: Stable show identifier for podcast:guid; omitted
+            when None.
 
     Returns:
         UTF-8 encoded RSS 2.0 XML document as a string.
     """
-    rss = Element("rss", {"version": "2.0", "xmlns:itunes": _ITUNES_NS})
+    rss = Element(
+        "rss",
+        {
+            "version": "2.0",
+            "xmlns:itunes": _ITUNES_NS,
+            "xmlns:podcast": _PODCAST_NS,
+        },
+    )
     channel = SubElement(rss, "channel")
 
     sorted_entries = sorted(
@@ -81,6 +94,8 @@ def build_rss_xml(
         base_url,
         description or default_description(title),
         last_build,
+        owner_email,
+        podcast_guid,
     )
     cover_url = f"{base_url}/cover.png"
     for entry in sorted_entries:
@@ -109,6 +124,8 @@ def _add_channel_metadata(
     base_url: str,
     description: str,
     last_build: str,
+    owner_email: str | None = None,
+    podcast_guid: str | None = None,
 ) -> None:
     """Populate RSS channel-level metadata elements.
 
@@ -119,6 +136,8 @@ def _add_channel_metadata(
         base_url: Base URL of the application.
         description: Channel description text.
         last_build: Preformatted RFC 2822 build timestamp.
+        owner_email: Owner address for podcast:locked; omitted when None.
+        podcast_guid: Stable show identifier; omitted when None.
     """
     SubElement(channel, "title").text = title
     SubElement(channel, "link").text = base_url
@@ -128,6 +147,11 @@ def _add_channel_metadata(
     SubElement(channel, "itunes:explicit").text = "false"
     SubElement(channel, "itunes:image", {"href": f"{base_url}/cover.png"})
     SubElement(channel, "itunes:category", {"text": _ITUNES_CATEGORY})
+    if podcast_guid is not None:
+        SubElement(channel, "podcast:guid").text = podcast_guid
+    if owner_email is not None:
+        locked = SubElement(channel, "podcast:locked", {"owner": owner_email})
+        locked.text = "yes"
     SubElement(channel, "lastBuildDate").text = last_build
     SubElement(
         channel,

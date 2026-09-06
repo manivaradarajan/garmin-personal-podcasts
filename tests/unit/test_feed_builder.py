@@ -267,3 +267,40 @@ def test_last_build_date_tracks_newest_episode() -> None:
     assert "Sep 2026" in (
         ET.fromstring(first).findtext("channel/lastBuildDate") or ""
     )
+
+
+def test_podcast_namespace_declared() -> None:
+    """Root element declares the podcast index namespace."""
+    xml = build_rss_xml([], "T", "https://f/feed", "https://base")
+    assert 'xmlns:podcast="https://podcastindex.org/namespace/1.0"' in xml
+
+
+def test_locked_and_guid_present_when_provided() -> None:
+    """Owner email and guid produce locked/guid elements."""
+    xml = build_rss_xml(
+        [],
+        "T",
+        "https://f/feed",
+        "https://base",
+        owner_email="a@b.com",
+        podcast_guid="1234-uuid",
+    )
+    ns = "{https://podcastindex.org/namespace/1.0}"
+    root = ET.fromstring(xml)
+    channel = root.find("channel")
+    assert channel is not None
+    guid = channel.find(f"{ns}guid")
+    assert guid is not None and guid.text == "1234-uuid"
+    locked = channel.find(f"{ns}locked")
+    assert locked is not None
+    assert locked.text == "yes" and locked.get("owner") == "a@b.com"
+
+
+def test_locked_and_guid_absent_when_missing() -> None:
+    """Without owner/guid no podcast elements are emitted."""
+    xml = build_rss_xml([], "T", "https://f/feed", "https://base")
+    ns = "{https://podcastindex.org/namespace/1.0}"
+    channel = ET.fromstring(xml).find("channel")
+    assert channel is not None
+    assert channel.find(f"{ns}guid") is None
+    assert channel.find(f"{ns}locked") is None

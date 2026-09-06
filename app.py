@@ -107,6 +107,8 @@ async def get_feed(
         feed_url=feed_url,
         base_url=settings.podcast_base_url,
         description=settings.podcast_description,
+        owner_email=_owner_email(settings),
+        podcast_guid=_podcast_guid(settings),
     )
     body = xml.encode("utf-8")
     etag = f'"{_sha256_hex(body)}"'
@@ -148,6 +150,40 @@ def _sha256_hex(data: bytes) -> str:
     import hashlib
 
     return hashlib.sha256(data).hexdigest()
+
+
+def _owner_email(settings: Settings) -> str | None:
+    """Return the first allowlisted email for podcast:locked.
+
+    Args:
+        settings: Application settings.
+
+    Returns:
+        First email address, or None when the allowlist is empty.
+    """
+    for raw in settings.allowed_emails.split(","):
+        email = raw.strip().lower()
+        if email:
+            return email
+    return None
+
+
+def _podcast_guid(settings: Settings) -> str:
+    """Return a stable show identifier derived from the Drive folder.
+
+    Args:
+        settings: Application settings.
+
+    Returns:
+        Deterministic UUID5 string, stable across environments.
+    """
+    import uuid
+
+    return str(
+        uuid.uuid5(
+            uuid.NAMESPACE_URL, f"drive:{settings.google_drive_folder_id}"
+        )
+    )
 
 
 def _feed_last_modified(entries: list[ManifestEntry]) -> str:
