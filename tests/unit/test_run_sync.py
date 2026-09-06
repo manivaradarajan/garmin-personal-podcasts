@@ -216,6 +216,7 @@ def test_mp3_upload_is_tagged_and_sized() -> None:
     assert entry.size_bytes == len(store._blobs["song.mp3"])
     assert store._blobs["song.mp3"][:3] == b"ID3"
     assert entry.tagged is True
+    assert entry.duration_sec is not None and entry.duration_sec > 0
 
 
 def test_untagged_passthrough_records_tagged_false() -> None:
@@ -228,6 +229,7 @@ def test_untagged_passthrough_records_tagged_false() -> None:
     )
     (entry,) = store.read_manifest()
     assert entry.tagged is False
+    assert entry.duration_sec is None
 
 
 def test_pretagged_mp3_records_tagged_true_untouched() -> None:
@@ -239,7 +241,7 @@ def test_pretagged_mp3_records_tagged_true_untouched() -> None:
     raw = (
         Path(__file__).parent.parent / "fixtures" / "untagged.mp3"
     ).read_bytes()
-    tagged = ensure_id3_tags(raw, "Song", "Cast")
+    tagged, _ = ensure_id3_tags(raw, "Song", "Cast")
 
     class _TaggedDrive(_StubDrive):
         def stream_file(self, file_id: str):

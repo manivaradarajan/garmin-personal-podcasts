@@ -15,13 +15,17 @@ __all__ = ["ensure_id3_tags", "has_id3_title"]
 _LOG = logging.getLogger(__name__)
 
 
-def ensure_id3_tags(data: bytes, title: str, album: str) -> bytes:
+def ensure_id3_tags(
+    data: bytes, title: str, album: str
+) -> tuple[bytes, float | None]:
     """Prepend minimal ID3v2.3 tags to an untagged MP3.
 
     Garmin watches need ID3 metadata to list and categorise episodes;
-    tagless files may merge into one entry or not display at all. Files
-    that already carry a title tag, and all non-MP3 content, pass
-    through byte-identical.
+    tagless files may merge into one entry or not display at all. The
+    injected set mirrors what working podcast files carry: title,
+    artist, album, genre, track number, and length. Files that already
+    carry a title tag, and all non-MP3 content, pass through
+    byte-identical.
 
     Args:
         data: Raw audio file bytes.
@@ -29,20 +33,24 @@ def ensure_id3_tags(data: bytes, title: str, album: str) -> bytes:
         album: Podcast/album name for the TALB frame.
 
     Returns:
-        Tagged bytes, or the input unchanged when tagging is
+        Tuple of (possibly tagged bytes, audio duration in seconds or
+        None when unknown). Input is returned unchanged when tagging is
         unnecessary or impossible.
     """
     if not _looks_like_mp3(data):
-        return data
+        return data, None
     try:
         audio = mutagen.File(BytesIO(data))
     except Exception as exc:
         _LOG.warning("Skipping ID3 tagging (unparseable): %s", exc)
-        return data
+        return data, None
     if audio is None or not isinstance(audio, mutagen.mp3.MP3):
-        return data
-    if audio.tags is not None and "TIT2" in audio.tags:
-        return data
+        return data, None
+    duration = _duration_sec(audio)
+    if audio.tags is not None and all(
+        frame in audio.tags for frame in ("TIT2", "TRCK", "TLEN")
+    ):
+        return data, duration
     try:
         tag = mutagen.id3.ID3()
         stem = Path(title).stem
@@ -50,12 +58,33 @@ def ensure_id3_tags(data: bytes, title: str, album: str) -> bytes:
         tag["TPE1"] = mutagen.id3.TPE1(encoding=3, text=album)
         tag["TALB"] = mutagen.id3.TALB(encoding=3, text=album)
         tag["TCON"] = mutagen.id3.TCON(encoding=3, text="Podcast")
+        tag["TRCK"] = mutagen.id3.TRCK(encoding=3, text="1")
+        if duration is not None:
+            tag["TLEN"] = mutagen.id3.TLEN(
+                encoding=3, text=str(int(duration * 1000))
+            )
         out = BytesIO()
         tag.save(out, v1=0, v2_version=3)
-        return out.getvalue() + _strip_id3v2(data)
+        return out.getvalue() + _strip_id3v2(data), duration
     except Exception as exc:
         _LOG.warning("Skipping ID3 tagging (failed): %s", exc)
-        return data
+        return data, duration
+
+
+def _duration_sec(audio: mutagen.mp3.MP3) -> float | None:
+    """Extract audio duration in seconds, or None when unknown.
+
+    Args:
+        audio: Loaded MP3 object.
+
+    Returns:
+        Duration in seconds, or None if unavailable.
+    """
+    try:
+        length = audio.info.length
+    except Exception:
+        return None
+    return length if isinstance(length, (int, float)) else None
 
 
 def has_id3_title(data: bytes) -> bool:

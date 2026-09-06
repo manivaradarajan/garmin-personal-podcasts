@@ -119,6 +119,8 @@ def _add_item(channel: Element, entry: ManifestEntry) -> None:
     guid = SubElement(item, "guid", {"isPermaLink": "false"})
     guid.text = entry.drive_file_id
     SubElement(item, "pubDate").text = _iso_to_rfc2822(entry.published_at)
+    if entry.duration_sec is not None:
+        SubElement(item, "itunes:duration").text = str(entry.duration_sec)
     SubElement(
         item,
         "enclosure",

@@ -39,6 +39,7 @@ class ManifestEntry:
         mime_type: MIME type — used in enclosure type.
         published_at: ISO 8601 UTC — set at first upload, never updated.
         tagged: Whether the served bytes carry an ID3 title tag.
+        duration_sec: Audio duration in whole seconds, if known.
     """
 
     drive_file_id: str
@@ -49,6 +50,7 @@ class ManifestEntry:
     mime_type: str
     published_at: str
     tagged: bool = False
+    duration_sec: int | None = None
 
 
 @dataclass(frozen=True)

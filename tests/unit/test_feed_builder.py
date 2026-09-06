@@ -167,3 +167,24 @@ def test_channel_has_itunes_author_and_explicit() -> None:
     ns = "{http://www.itunes.com/dtds/podcast-1.0.dtd}"
     assert channel.findtext(f"{ns}author") == "My Cast"
     assert channel.findtext(f"{ns}explicit") == "no"
+
+
+def test_item_has_itunes_duration_when_known() -> None:
+    """Items with known duration emit itunes:duration in seconds."""
+    import dataclasses
+
+    entry = dataclasses.replace(_entry(), duration_sec=2708)
+    xml = build_rss_xml([entry], "T", "https://f/feed", "https://base")
+    ns = "{http://www.itunes.com/dtds/podcast-1.0.dtd}"
+    item = ET.fromstring(xml).find(".//item")
+    assert item is not None
+    assert item.findtext(f"{ns}duration") == "2708"
+
+
+def test_item_omits_itunes_duration_when_unknown() -> None:
+    """Items without duration omit the itunes:duration element."""
+    xml = build_rss_xml([_entry()], "T", "https://f/feed", "https://base")
+    ns = "{http://www.itunes.com/dtds/podcast-1.0.dtd}"
+    item = ET.fromstring(xml).find(".//item")
+    assert item is not None
+    assert item.find(f"{ns}duration") is None

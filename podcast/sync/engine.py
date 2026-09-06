@@ -272,7 +272,7 @@ def _upload_file(
     """
     try:
         raw = b"".join(drive_client.stream_file(drive_file.id))
-        data = ensure_id3_tags(raw, drive_file.name, album)
+        data, duration = ensure_id3_tags(raw, drive_file.name, album)
         blob_url = blob_store.upload(
             drive_file.name, data, drive_file.mime_type, cache_max_age=86400
         )
@@ -285,6 +285,7 @@ def _upload_file(
             mime_type=drive_file.mime_type,
             published_at=datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
             tagged=has_id3_title(data),
+            duration_sec=int(duration) if duration is not None else None,
         )
     except Exception as exc:
         _LOG.error("Failed to upload %s: %s", drive_file.name, exc)
@@ -315,7 +316,7 @@ def _reupload_file(
     """
     try:
         raw = b"".join(drive_client.stream_file(drive_file.id))
-        data = ensure_id3_tags(raw, drive_file.name, album)
+        data, duration = ensure_id3_tags(raw, drive_file.name, album)
         blob_url = blob_store.upload(
             drive_file.name, data, drive_file.mime_type, cache_max_age=86400
         )
@@ -327,6 +328,7 @@ def _reupload_file(
             size_bytes=len(data),
             mime_type=drive_file.mime_type,
             tagged=has_id3_title(data),
+            duration_sec=int(duration) if duration is not None else None,
         )
         if blob_url != old_entry.blob_url:
             try:
