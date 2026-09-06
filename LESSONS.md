@@ -92,6 +92,17 @@ pydantic-settings defaults to `extra="forbid"` — every request 500'd.
   as unknown. Version resolves via `.python-version` + `requires-python`.
 - Hobby plan allows daily crons only (`0 0 * * *`); hourly needs Pro.
 
+## Validator findings need independent reproduction
+
+podba.se has twice reported claims contradicted by direct probes: episode
+HEAD 405s (live HEAD returned 200) and missing byte-range support (live
+matrix: 206 on open/mid/suffix ranges, correct 416 over-range,
+`accept-ranges` on full GET and HEAD, over HTTP/1.1 and HTTP/2). It also
+once flagged per-item `itunes:image` as missing while present in the
+fetched source — stale validator-side caching. Rule: reproduce every
+validator failure with `curl` before changing code; Vercel Blob edge
+behavior is not code-changeable anyway.
+
 ## Test-suite gotchas
 
 - Tampering the **last** base64 character of a signed cookie is sometimes
