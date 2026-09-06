@@ -291,7 +291,10 @@ def _upload_file(
     """
     try:
         raw = b"".join(drive_client.stream_file(drive_file.id))
-        data, duration = ensure_id3_tags(raw, drive_file.name, album)
+        published_at = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+        data, duration = ensure_id3_tags(
+            raw, drive_file.name, album, published_at[:4]
+        )
         blob_url = blob_store.upload(
             _blob_path(drive_file),
             data,
@@ -305,7 +308,7 @@ def _upload_file(
             name=drive_file.name,
             size_bytes=len(data),
             mime_type=drive_file.mime_type,
-            published_at=datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            published_at=published_at,
             tagged=has_id3_title(data),
             duration_sec=int(duration) if duration is not None else None,
         )
@@ -338,7 +341,9 @@ def _reupload_file(
     """
     try:
         raw = b"".join(drive_client.stream_file(drive_file.id))
-        data, duration = ensure_id3_tags(raw, drive_file.name, album)
+        data, duration = ensure_id3_tags(
+            raw, drive_file.name, album, old_entry.published_at[:4]
+        )
         blob_url = blob_store.upload(
             _blob_path(drive_file),
             data,

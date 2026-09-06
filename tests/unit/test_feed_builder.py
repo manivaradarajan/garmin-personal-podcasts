@@ -188,3 +188,32 @@ def test_item_omits_itunes_duration_when_unknown() -> None:
     item = ET.fromstring(xml).find(".//item")
     assert item is not None
     assert item.find(f"{ns}duration") is None
+
+
+def test_channel_and_item_images_present() -> None:
+    """Channel and items reference the cover art URL."""
+    xml = build_rss_xml(
+        [_entry()], "My Cast", "https://f/feed", "https://base.test"
+    )
+    ns = "{http://www.itunes.com/dtds/podcast-1.0.dtd}"
+    root = ET.fromstring(xml)
+    channel = root.find("channel")
+    assert channel is not None
+    assert (
+        channel.find(f"{ns}image").get("href") == "https://base.test/cover.png"
+    )
+    item = root.find(".//item")
+    assert item is not None
+    assert item.find(f"{ns}image").get("href") == "https://base.test/cover.png"
+
+
+def test_item_author_and_subtitle_present() -> None:
+    """Items carry itunes author and subtitle elements."""
+    xml = build_rss_xml(
+        [_entry()], "My Cast", "https://f/feed", "https://base.test"
+    )
+    ns = "{http://www.itunes.com/dtds/podcast-1.0.dtd}"
+    item = ET.fromstring(xml).find(".//item")
+    assert item is not None
+    assert item.findtext(f"{ns}author") == "My Cast"
+    assert item.findtext(f"{ns}subtitle") == "Episode 1.mp3"

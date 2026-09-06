@@ -66,8 +66,9 @@ def build_rss_xml(
         key=lambda e: e.published_at,
         reverse=True,
     )
+    cover_url = f"{base_url}/cover.png"
     for entry in sorted_entries:
-        _add_item(channel, entry)
+        _add_item(channel, entry, title, cover_url)
 
     xml_bytes = tostring(rss, encoding="unicode", xml_declaration=False)
     return '<?xml version="1.0" encoding="UTF-8"?>\n' + xml_bytes
@@ -93,6 +94,7 @@ def _add_channel_metadata(
     SubElement(channel, "language").text = "en"
     SubElement(channel, "itunes:author").text = title
     SubElement(channel, "itunes:explicit").text = "no"
+    SubElement(channel, "itunes:image", {"href": f"{base_url}/cover.png"})
     SubElement(channel, "lastBuildDate").text = _rfc2822_now()
     SubElement(
         channel,
@@ -106,16 +108,23 @@ def _add_channel_metadata(
     )
 
 
-def _add_item(channel: Element, entry: ManifestEntry) -> None:
+def _add_item(
+    channel: Element, entry: ManifestEntry, author: str, cover_url: str
+) -> None:
     """Append a single <item> element to the channel.
 
     Args:
         channel: The <channel> XML element to append to.
         entry: ManifestEntry representing the audio episode.
+        author: Podcast author name for itunes:author.
+        cover_url: Absolute cover art URL for itunes:image.
     """
     item = SubElement(channel, "item")
     SubElement(item, "title").text = entry.name
     SubElement(item, "description").text = entry.name
+    SubElement(item, "itunes:author").text = author
+    SubElement(item, "itunes:subtitle").text = entry.name
+    SubElement(item, "itunes:image", {"href": cover_url})
     guid = SubElement(item, "guid", {"isPermaLink": "false"})
     guid.text = entry.drive_file_id
     SubElement(item, "pubDate").text = _iso_to_rfc2822(entry.published_at)

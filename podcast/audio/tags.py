@@ -16,21 +16,22 @@ _LOG = logging.getLogger(__name__)
 
 
 def ensure_id3_tags(
-    data: bytes, title: str, album: str
+    data: bytes, title: str, album: str, year: str | None = None
 ) -> tuple[bytes, float | None]:
     """Prepend minimal ID3v2.3 tags to an untagged MP3.
 
     Garmin watches need ID3 metadata to list and categorise episodes;
     tagless files may merge into one entry or not display at all. The
     injected set mirrors what working podcast files carry: title,
-    artist, album, genre, track number, and length. Files that already
-    carry a title tag, and all non-MP3 content, pass through
-    byte-identical.
+    artist, album, genre, track number, length, and recording year.
+    Files that already carry a complete tag set, and all non-MP3
+    content, pass through byte-identical.
 
     Args:
         data: Raw audio file bytes.
         title: Episode title (filename without extension).
         album: Podcast/album name for the TALB frame.
+        year: Four-digit year for the TDRC frame, if known.
 
     Returns:
         Tuple of (possibly tagged bytes, audio duration in seconds or
@@ -70,10 +71,17 @@ def ensure_id3_tags(
             tag["TLEN"] = mutagen.id3.TLEN(
                 encoding=_frame_encoding(length_ms), text=length_ms
             )
+        if year is not None:
+            tag["TDRC"] = mutagen.id3.TDRC(
+                encoding=_frame_encoding(year), text=year
+            )
         out = BytesIO()
         tag.save(out, v1=0, v2_version=3)
-        v1_block = bytes(mutagen.id3.MakeID3v1(tag))
-        return out.getvalue() + _strip_id3v2(data) + v1_block, duration
+        v1_block = bytearray(bytes(mutagen.id3.MakeID3v1(tag)))
+        # Force genre 12 ("Other"): mutagen maps "Podcast" to an
+        # extended-table id most firmware genre tables don't contain.
+        v1_block[127] = 12
+        return out.getvalue() + _strip_id3v2(data) + bytes(v1_block), duration
     except Exception as exc:
         _LOG.warning("Skipping ID3 tagging (failed): %s", exc)
         return data, duration

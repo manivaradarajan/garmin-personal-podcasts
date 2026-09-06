@@ -6,9 +6,10 @@ import hmac
 import logging
 import os
 from dataclasses import asdict
+from pathlib import Path
 
 from fastapi import Depends, FastAPI, Request
-from fastapi.responses import JSONResponse, Response
+from fastapi.responses import FileResponse, JSONResponse, Response
 from starlette.middleware.sessions import SessionMiddleware
 
 from podcast.blob.protocol import BlobStore
@@ -28,6 +29,7 @@ from podcast.web.dashboard_routes import router as dashboard_router
 from podcast.web.sync_routes import router as sync_router
 
 _LOG = logging.getLogger(__name__)
+_COVER_PATH = Path(__file__).parent / "podcast" / "web" / "static" / "cover.png"
 
 app = FastAPI(title="Garmin Personal Podcasts", docs_url=None, redoc_url=None)
 
@@ -47,6 +49,20 @@ app.add_middleware(
 app.include_router(auth_router)
 app.include_router(dashboard_router)
 app.include_router(sync_router)
+
+
+@app.get("/cover.png", response_class=FileResponse)
+async def get_cover() -> FileResponse:
+    """Serve the podcast cover artwork (immutable static asset).
+
+    Returns:
+        PNG cover image with long-lived caching.
+    """
+    return FileResponse(
+        path=_COVER_PATH,
+        media_type="image/png",
+        headers={"Cache-Control": "public, max-age=31536000, immutable"},
+    )
 
 
 @app.get("/api/feed")

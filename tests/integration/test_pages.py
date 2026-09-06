@@ -294,3 +294,15 @@ def test_dashboard_shows_recorded_feed_hits() -> None:
         app.dependency_overrides.clear()
     assert resp.status_code == 200
     assert "PlayRun/1.0" in resp.text
+
+
+def test_cover_route_serves_png() -> None:
+    """GET /cover.png returns a PNG image."""
+    client = _client(make_settings(), make_store())
+    try:
+        resp = client.get("/cover.png")
+    finally:
+        app.dependency_overrides.clear()
+    assert resp.status_code == 200
+    assert resp.headers["content-type"] == "image/png"
+    assert resp.content[:8] == b"\x89PNG\r\n\x1a\n"

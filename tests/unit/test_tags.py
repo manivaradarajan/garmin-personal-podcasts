@@ -143,3 +143,25 @@ def test_latin1_complete_file_passes_through() -> None:
     """Complete Latin-1 tag set returns byte-identical (preserve path)."""
     out, _ = ensure_id3_tags(_raw(), "My Episode", "My Cast")
     assert ensure_id3_tags(out, "My Episode", "My Cast")[0] == out
+
+
+def test_tdrc_year_frame_injected_when_known() -> None:
+    """Known year lands in a Latin-1 TDRC frame."""
+    from mutagen.id3 import Encoding
+
+    out, _ = ensure_id3_tags(_raw(), "T", "A", "2026")
+    tag = mutagen.File(BytesIO(out))
+    assert tag["TDRC"].encoding == Encoding.LATIN1
+    assert str(tag["TDRC"].text[0]) == "2026"
+
+
+def test_no_tdrc_when_year_unknown() -> None:
+    """Missing year leaves no TDRC frame behind."""
+    out, _ = ensure_id3_tags(_raw(), "T", "A")
+    assert "TDRC" not in mutagen.File(BytesIO(out)).tags
+
+
+def test_v1_genre_byte_is_other() -> None:
+    """v1 trailer genre is 12 (Other), safe for old firmware tables."""
+    out, _ = ensure_id3_tags(_raw(), "T", "A", "2026")
+    assert out[-1] == 12
