@@ -94,10 +94,17 @@ async def get_feed(
         return JSONResponse({"error": "Forbidden"}, status_code=403)
 
     entries = blob_store.read_manifest()
+    # Built from config, not the request: behind Vercel the request URL
+    # carries the deployment-specific hostname, which never matches the
+    # canonical document location validators compare against.
+    feed_url = (
+        f"{settings.podcast_base_url}/api/feed"
+        f"?token={settings.feed_secret_token}"
+    )
     xml = build_rss_xml(
         entries=entries,
         title=settings.podcast_title,
-        feed_url=str(request.url),
+        feed_url=feed_url,
         base_url=settings.podcast_base_url,
         description=settings.podcast_description,
     )

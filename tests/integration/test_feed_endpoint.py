@@ -127,3 +127,23 @@ def test_feed_get_carries_caching_headers() -> None:
     assert int(resp.headers["content-length"]) == len(resp.content)
     assert resp.headers["etag"].startswith('"')
     assert "last-modified" in resp.headers
+
+
+def test_feed_self_link_uses_configured_base_url(sample_manifest_entry) -> None:
+    """atom self link matches config, not the incoming request host."""
+    settings = make_settings(podcast_base_url="https://canonical.test")
+    store = make_store()
+    store.write_manifest([sample_manifest_entry])
+    client = _client(settings, store)
+    try:
+        resp = client.get(
+            "/api/feed",
+            params={"token": "feed-secret"},
+            headers={"host": "other-host.test"},
+        )
+    finally:
+        app.dependency_overrides.clear()
+    assert resp.status_code == 200
+    assert (
+        'href="https://canonical.test/api/feed?token=feed-secret"' in resp.text
+    )
