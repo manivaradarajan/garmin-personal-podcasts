@@ -120,6 +120,30 @@ tr:last-child td { border-bottom: none; }
   <p style="font-size:.8rem;color:#9ca3af;margin-top:.5rem">
     Add this URL to PlayRun → Search → Add custom feed.
   </p>
+
+  <h2 style="margin-top:1.25rem">Feed fetches ({{ feed_hits|length }})</h2>
+  {% if feed_hits %}
+  <table>
+    <thead>
+      <tr>
+        <th>Time (UTC)</th>
+        <th>Status</th>
+        <th>Client</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for hit in feed_hits %}
+      <tr>
+        <td style="white-space:nowrap;color:#6b7280">{{ hit.timestamp[11:19] }} {{ hit.timestamp[:10] }}</td>
+        <td>{{ hit.status }}</td>
+        <td style="color:#6b7280;word-break:break-all">{{ hit.user_agent }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p style="font-size:.85rem;color:#9ca3af">No fetches recorded yet — open the feed URL above to log one.</p>
+  {% endif %}
 </div>
 
 <!-- Sync controls -->

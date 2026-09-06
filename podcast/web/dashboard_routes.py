@@ -13,6 +13,7 @@ from podcast.compat import check_compatibility
 from podcast.config import Settings
 from podcast.deps import get_blob_store, get_drive_client, get_settings
 from podcast.drive.client import DriveClient, DriveListError
+from podcast.feed.hits import read_feed_hits
 from podcast.sync.engine import compute_diff, is_sync_locked
 from podcast.web.middleware import require_login
 
@@ -86,6 +87,10 @@ async def dashboard(
         f"?token={settings.feed_secret_token}"
     )
 
+    # Newest first, capped for display. Reads may lag writes by ~a
+    # minute due to Blob edge caching (see LESSONS.md).
+    feed_hits = read_feed_hits(blob_store)[-10:][::-1]
+
     return templates.TemplateResponse(
         request,
         "dashboard.html",
@@ -99,6 +104,7 @@ async def dashboard(
             "pending": pending,
             "drive_ok": drive_ok,
             "incompatible": incompatible,
+            "feed_hits": feed_hits,
             "feed_url": feed_url,
             "podcast_title": settings.podcast_title,
             "flash": flash,

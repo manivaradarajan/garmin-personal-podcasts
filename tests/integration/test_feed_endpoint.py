@@ -63,3 +63,18 @@ def test_feed_cache_control_no_store() -> None:
     finally:
         app.dependency_overrides.clear()
     assert resp.headers.get("cache-control") == "no-store"
+
+
+def test_feed_request_is_recorded() -> None:
+    """A feed request appends a hit to the injected store."""
+    from podcast.feed.hits import read_feed_hits
+
+    settings = make_settings()
+    store = make_store()
+    client = _client(settings, store)
+    try:
+        client.get("/api/feed", params={"token": "feed-secret"})
+    finally:
+        app.dependency_overrides.clear()
+    (hit,) = read_feed_hits(store)
+    assert hit.status == 200

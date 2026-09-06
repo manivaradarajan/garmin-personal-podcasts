@@ -16,6 +16,7 @@ from podcast.config import Settings
 from podcast.deps import get_blob_store, get_drive_client, get_settings
 from podcast.drive.client import DriveClient
 from podcast.feed.builder import build_rss_xml
+from podcast.feed.hits import record_feed_hit
 from podcast.sync.engine import (
     LockHeldError,
     _acquire_lock,
@@ -66,7 +67,9 @@ async def get_feed(
     Returns:
         RSS 2.0 XML response, or a 403 JSON error if the token is invalid.
     """
+    user_agent = request.headers.get("user-agent")
     if not token or not hmac.compare_digest(token, settings.feed_secret_token):
+        record_feed_hit(blob_store, user_agent, 403)
         return JSONResponse({"error": "Forbidden"}, status_code=403)
 
     entries = blob_store.read_manifest()
@@ -76,6 +79,7 @@ async def get_feed(
         feed_url=str(request.url),
         base_url=settings.podcast_base_url,
     )
+    record_feed_hit(blob_store, user_agent, 200)
     return Response(
         content=xml,
         media_type="application/rss+xml",

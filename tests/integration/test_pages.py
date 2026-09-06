@@ -278,3 +278,19 @@ def test_dashboard_shows_id3_badge_for_tagged_files() -> None:
     assert resp.status_code == 200
     assert "🏷 ID3" in resp.text
     assert resp.text.count('<span class="tag-badge"') == 1
+
+
+def test_dashboard_shows_recorded_feed_hits() -> None:
+    """Pre-recorded feed hits render in the fetches table."""
+    from podcast.feed.hits import record_feed_hit
+
+    settings = make_settings()
+    store = make_store()
+    record_feed_hit(store, "PlayRun/1.0", 200)
+    client = _client(settings, store, authed=True)
+    try:
+        resp = client.get("/")
+    finally:
+        app.dependency_overrides.clear()
+    assert resp.status_code == 200
+    assert "PlayRun/1.0" in resp.text
