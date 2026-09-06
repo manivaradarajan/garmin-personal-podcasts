@@ -1,0 +1,274 @@
+{% extends "base.html" %}
+
+{% block title %}Dashboard — {{ podcast_title }}{% endblock %}
+
+{% block extra_styles %}
+.storage-bar-wrap { margin-bottom: .5rem; }
+.storage-bar-bg {
+  background: #e5e7eb;
+  border-radius: 999px;
+  height: 10px;
+  overflow: hidden;
+}
+.storage-bar-fill {
+  height: 100%;
+  border-radius: 999px;
+  transition: width .3s;
+}
+.bar-green  { background: #22c55e; }
+.bar-yellow { background: #eab308; }
+.bar-red    { background: #ef4444; }
+.storage-label { font-size: .8rem; color: #6b7280; margin-top: .35rem; }
+.feed-row {
+  display: flex; align-items: center; gap: .75rem; flex-wrap: wrap;
+  margin-top: .5rem;
+}
+.feed-url-input {
+  flex: 1; min-width: 200px;
+  border: 1px solid #d1d5db;
+  border-radius: 5px;
+  padding: .4rem .75rem;
+  font-size: .85rem;
+  background: #f9fafb;
+  color: #374151;
+}
+.syncing-badge {
+  display: inline-flex; align-items: center; gap: .4rem;
+  background: #fef3c7; color: #92400e;
+  border-radius: 999px; padding: .25rem .75rem; font-size: .8rem;
+}
+table { width: 100%; border-collapse: collapse; font-size: .875rem; }
+th { text-align: left; padding: .5rem .75rem; color: #6b7280; font-weight: 600;
+     border-bottom: 1.5px solid #e5e7eb; white-space: nowrap; }
+td { padding: .5rem .75rem; border-bottom: 1px solid #f3f4f6; vertical-align: top; }
+tr:last-child td { border-bottom: none; }
+.name-cell { font-weight: 500; word-break: break-word; }
+.audio-player {
+  display: flex; align-items: center; gap: .5rem; flex-wrap: wrap;
+  margin-top: .4rem;
+}
+.audio-player button {
+  background: none; border: 1px solid #d1d5db; border-radius: 5px;
+  padding: .25rem .5rem; font-size: .8rem; cursor: pointer; color: #374151;
+}
+.audio-player button:hover { background: #f3f4f6; }
+.audio-player .play-btn { background: #4f46e5; color: #fff; border-color: #4f46e5; }
+.audio-player .play-btn:hover { background: #4338ca; }
+.seek-wrap { display: flex; align-items: center; gap: .35rem; }
+.seek-wrap input[type=range] { width: 120px; }
+.time-label { font-size: .75rem; color: #6b7280; white-space: nowrap; }
+.empty-state { text-align: center; padding: 3rem 1rem; color: #9ca3af; }
+.sync-header { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: .5rem; }
+.flash { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
+.flash-close { color: #065f46; font-size: 1.25rem; font-weight: 700; line-height: 1; text-decoration: none; }
+.flash-close:hover { color: #047857; }
+{% endblock %}
+
+{% block content %}
+
+{% if flash %}
+<div class="flash">{{ flash }}<a class="flash-close" href="/" aria-label="Dismiss">×</a></div>
+{% endif %}
+
+<!-- Storage & feed info -->
+<div class="card">
+  <h2>Storage</h2>
+  {% set bar_class = "bar-green" if usage_pct < 70 else ("bar-yellow" if usage_pct < 90 else "bar-red") %}
+  <div class="storage-bar-wrap">
+    <div class="storage-bar-bg">
+      <div class="storage-bar-fill {{ bar_class }}" style="width: {{ usage_pct }}%"></div>
+    </div>
+    <div class="storage-label">
+      {{ "%.1f"|format(total_bytes / 1048576) }} MB of {{ quota_bytes // 1048576 }} MB used
+      ({{ usage_pct }}%)
+    </div>
+  </div>
+
+  <h2 style="margin-top:1.25rem">Feed URL</h2>
+  <div class="feed-row">
+    <input class="feed-url-input" id="feed-url-input" type="text"
+           value="{{ feed_url }}" readonly>
+    <button class="btn btn-secondary" onclick="copyFeedUrl()">Copy</button>
+  </div>
+  <p style="font-size:.8rem;color:#9ca3af;margin-top:.5rem">
+    Add this URL to PlayRun → Search → Add custom feed.
+  </p>
+</div>
+
+<!-- Sync controls -->
+<div class="card">
+  <div class="sync-header">
+    <h2 style="margin-bottom:0">Sync</h2>
+    <div style="display:flex;align-items:center;gap:.75rem">
+      {% if is_syncing %}
+      <span class="syncing-badge">⏳ Sync in progress…</span>
+      {% endif %}
+      <form method="post" action="/api/sync/trigger">
+        <button class="btn btn-primary" type="submit"
+                {% if is_syncing %}disabled{% endif %}>
+          Sync Now
+        </button>
+      </form>
+    </div>
+  </div>
+  <p style="font-size:.8rem;color:#9ca3af;margin-top:.5rem">
+    Cron runs hourly. Manual trigger shares the same lock.
+  </p>
+</div>
+
+<!-- File table -->
+<div class="card">
+  <h2>Episodes ({{ entries|length }})</h2>
+  {% if entries %}
+  <table>
+    <thead>
+      <tr>
+        <th>Name</th>
+        <th>Size</th>
+        <th>Type</th>
+        <th>Published</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for entry in entries|sort(attribute="published_at", reverse=true) %}
+      <tr>
+        <td class="name-cell">
+          {{ entry.name }}
+          <!-- Audio player -->
+          <div class="audio-player" data-player="{{ loop.index0 }}">
+            <audio id="audio-{{ loop.index0 }}"
+                   src="{{ entry.blob_url }}"
+                   preload="none"></audio>
+            <button class="play-btn"
+                    onclick="togglePlay({{ loop.index0 }})">▶</button>
+            <button onclick="skip({{ loop.index0 }}, -10)">−10s</button>
+            <button onclick="skip({{ loop.index0 }}, 30)">+30s</button>
+            <div class="seek-wrap">
+              <input type="range" id="seek-{{ loop.index0 }}" min="0" value="0"
+                     oninput="seek({{ loop.index0 }}, this.value)">
+              <span class="time-label" id="time-{{ loop.index0 }}">0:00 / 0:00</span>
+            </div>
+          </div>
+        </td>
+        <td style="white-space:nowrap">
+          {{ "%.1f"|format(entry.size_bytes / 1048576) }} MB
+        </td>
+        <td style="color:#6b7280">{{ entry.mime_type }}</td>
+        <td style="white-space:nowrap;color:#6b7280">
+          {{ entry.published_at[:10] }}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <div class="empty-state">
+    <p>No episodes synced yet.</p>
+    <p style="margin-top:.5rem;font-size:.85rem">
+      Trigger a sync or wait for the hourly cron job.
+    </p>
+  </div>
+  {% endif %}
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+  // --- Feed URL copy ---
+  function copyFeedUrl() {
+    const input = document.getElementById("feed-url-input");
+    navigator.clipboard.writeText(input.value).catch(() => {
+      input.select();
+      document.execCommand("copy");
+    });
+  }
+
+  // --- Audio player management ---
+  const audios = document.querySelectorAll("audio");
+
+  function getAudio(idx) {
+    return document.getElementById("audio-" + idx);
+  }
+  function getSeek(idx) {
+    return document.getElementById("seek-" + idx);
+  }
+  function getTimeLabel(idx) {
+    return document.getElementById("time-" + idx);
+  }
+  function getPlayBtn(idx) {
+    return document.querySelector(
+      '[data-player="' + idx + '"] .play-btn'
+    );
+  }
+
+  function formatTime(secs) {
+    if (!isFinite(secs)) return "0:00";
+    const m = Math.floor(secs / 60);
+    const s = Math.floor(secs % 60);
+    return m + ":" + (s < 10 ? "0" : "") + s;
+  }
+
+  function updateLabel(idx) {
+    const a = getAudio(idx);
+    const lbl = getTimeLabel(idx);
+    if (lbl) {
+      lbl.textContent =
+        formatTime(a.currentTime) + " / " + formatTime(a.duration);
+    }
+  }
+
+  function pauseAll(exceptIdx) {
+    audios.forEach((a, i) => {
+      if (i !== exceptIdx && !a.paused) {
+        a.pause();
+        const btn = getPlayBtn(i);
+        if (btn) btn.textContent = "▶";
+      }
+    });
+  }
+
+  function togglePlay(idx) {
+    const a = getAudio(idx);
+    const btn = getPlayBtn(idx);
+    if (a.paused) {
+      pauseAll(idx);
+      a.play();
+      if (btn) btn.textContent = "⏸";
+    } else {
+      a.pause();
+      if (btn) btn.textContent = "▶";
+    }
+  }
+
+  function skip(idx, delta) {
+    const a = getAudio(idx);
+    a.currentTime = Math.max(0, Math.min(a.duration || 0, a.currentTime + delta));
+    updateLabel(idx);
+  }
+
+  function seek(idx, value) {
+    const a = getAudio(idx);
+    a.currentTime = parseFloat(value);
+    updateLabel(idx);
+  }
+
+  // Wire up timeupdate and metadata events for all players
+  audios.forEach((a, i) => {
+    a.addEventListener("timeupdate", () => {
+      const seek = getSeek(i);
+      if (seek) seek.value = a.currentTime;
+      updateLabel(i);
+    });
+    a.addEventListener("loadedmetadata", () => {
+      const seek = getSeek(i);
+      if (seek) seek.max = a.duration;
+      updateLabel(i);
+    });
+    a.addEventListener("ended", () => {
+      const btn = getPlayBtn(i);
+      if (btn) btn.textContent = "▶";
+    });
+  });
+</script>
+{% endblock %}
