@@ -40,6 +40,7 @@ class ManifestEntry:
         published_at: ISO 8601 UTC — set at first upload, never updated.
         tagged: Whether the served bytes carry an ID3 title tag.
         duration_sec: Audio duration in whole seconds, if known.
+        id3: Snapshot of text ID3 frames for dashboard display.
     """
 
     drive_file_id: str
@@ -51,6 +52,7 @@ class ManifestEntry:
     published_at: str
     tagged: bool = False
     duration_sec: int | None = None
+    id3: dict[str, str] | None = None
 
 
 @dataclass(frozen=True)

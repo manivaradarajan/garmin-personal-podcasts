@@ -7,7 +7,11 @@ from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 
-from podcast.audio.tags import ensure_id3_tags, has_id3_title
+from podcast.audio.tags import (
+    ensure_id3_tags,
+    has_id3_title,
+    snapshot_id3_tags,
+)
 from podcast.blob.protocol import BlobStore
 from podcast.config import Settings
 from podcast.drive.client import DriveClient
@@ -311,6 +315,7 @@ def _upload_file(
             published_at=published_at,
             tagged=has_id3_title(data),
             duration_sec=int(duration) if duration is not None else None,
+            id3=snapshot_id3_tags(data),
         )
     except Exception as exc:
         _LOG.error("Failed to upload %s: %s", drive_file.name, exc)
@@ -359,6 +364,7 @@ def _reupload_file(
             mime_type=drive_file.mime_type,
             tagged=has_id3_title(data),
             duration_sec=int(duration) if duration is not None else None,
+            id3=snapshot_id3_tags(data),
         )
         if blob_url != old_entry.blob_url:
             try:

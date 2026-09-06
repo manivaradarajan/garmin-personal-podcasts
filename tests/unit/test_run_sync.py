@@ -217,6 +217,7 @@ def test_mp3_upload_is_tagged_and_sized() -> None:
     assert store._blobs["episodes/song.mp3"][:3] == b"ID3"
     assert entry.tagged is True
     assert entry.duration_sec is not None and entry.duration_sec > 0
+    assert entry.id3 is not None and "TIT2" in entry.id3
 
 
 def test_untagged_passthrough_records_tagged_false() -> None:
@@ -229,6 +230,7 @@ def test_untagged_passthrough_records_tagged_false() -> None:
     )
     (entry,) = store.read_manifest()
     assert entry.tagged is False
+    assert entry.id3 == {}
     assert entry.duration_sec is None
 
 

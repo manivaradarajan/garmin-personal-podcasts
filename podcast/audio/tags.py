@@ -10,7 +10,7 @@ import mutagen
 import mutagen.id3
 import mutagen.mp3
 
-__all__ = ["ensure_id3_tags", "has_id3_title"]
+__all__ = ["ensure_id3_tags", "has_id3_title", "snapshot_id3_tags"]
 
 _LOG = logging.getLogger(__name__)
 
@@ -237,3 +237,39 @@ def _strip_id3v2(data: bytes) -> bytes:
         )
         return data[10 + size :]
     return data
+
+
+_MAX_SNAPSHOT_FRAMES = 24
+_MAX_SNAPSHOT_CHARS = 120
+_ENCODING_NAMES = {0: "LATIN1", 1: "UTF16", 2: "UTF16BE", 3: "UTF8"}
+
+
+def snapshot_id3_tags(data: bytes) -> dict[str, str]:
+    """Snapshot text ID3 frames for dashboard display.
+
+    Args:
+        data: Raw audio file bytes to inspect.
+
+    Returns:
+        Mapping of frame ID to "text [Encoding]", capped in count
+        and length. Empty when no text frames exist or content is
+        unparseable. Binary frames (e.g. APIC artwork) are skipped.
+    """
+    try:
+        audio = mutagen.File(BytesIO(data))
+    except Exception:
+        return {}
+    if audio is None or audio.tags is None:
+        return {}
+    snapshot: dict[str, str] = {}
+    for frame_id in sorted(audio.tags.keys()):
+        if len(snapshot) >= _MAX_SNAPSHOT_FRAMES:
+            break
+        frame = audio.tags[frame_id]
+        text = getattr(frame, "text", None)
+        if not text:
+            continue
+        enc_name = _ENCODING_NAMES.get(int(getattr(frame, "encoding", -1)), "?")
+        value = str(text[0])[:_MAX_SNAPSHOT_CHARS]
+        snapshot[str(frame_id)] = f"{value} [{enc_name}]"
+    return snapshot

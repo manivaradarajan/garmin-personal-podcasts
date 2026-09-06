@@ -211,3 +211,25 @@ def test_normalized_output_is_stable() -> None:
     assert (
         ensure_id3_tags(complete, "file.mp3", "My Cast", "2026")[0] == complete
     )
+
+
+def test_snapshot_lists_frames_with_encodings() -> None:
+    """Snapshot maps frame IDs to text plus encoding names."""
+    from podcast.audio.tags import snapshot_id3_tags
+
+    out, _ = ensure_id3_tags(_raw(), "My Episode", "My Cast")
+    snap = snapshot_id3_tags(out)
+    assert snap["TIT2"] == "My Episode [LATIN1]"
+    assert snap["TALB"] == "My Cast [LATIN1]"
+    assert "TRCK" in snap and "TLEN" in snap and "TDRC" not in snap
+
+
+def test_snapshot_empty_for_untagged_and_non_audio() -> None:
+    """Tagless fixture shows only its encoder tag; non-audio is empty."""
+    from podcast.audio.tags import snapshot_id3_tags
+
+    snap = snapshot_id3_tags(_raw())
+    assert "TIT2" not in snap
+    assert snap["TSSE"].endswith("[UTF8]")
+    assert snapshot_id3_tags(b"not audio") == {}
+    assert snapshot_id3_tags(b"") == {}

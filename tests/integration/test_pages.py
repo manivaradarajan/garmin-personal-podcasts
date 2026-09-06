@@ -277,7 +277,7 @@ def test_dashboard_shows_id3_badge_for_tagged_files() -> None:
         app.dependency_overrides.clear()
     assert resp.status_code == 200
     assert "🏷 ID3" in resp.text
-    assert resp.text.count('<span class="tag-badge"') == 1
+    assert resp.text.count('<summary class="tag-badge"') == 1
 
 
 def test_dashboard_shows_recorded_feed_hits() -> None:
@@ -306,3 +306,36 @@ def test_cover_route_serves_png() -> None:
     assert resp.status_code == 200
     assert resp.headers["content-type"] == "image/png"
     assert resp.content[:8] == b"\x89PNG\r\n\x1a\n"
+
+
+def test_dashboard_shows_id3_details_and_download() -> None:
+    """Tagged entry renders frame details expander and download icon."""
+    from podcast.models import ManifestEntry
+
+    settings = make_settings()
+    store = make_store()
+    store.write_manifest(
+        [
+            ManifestEntry(
+                drive_file_id="fid-1",
+                drive_md5="md5",
+                blob_url="https://blob.test/ep.mp3",
+                name="ep.mp3",
+                size_bytes=100,
+                mime_type="audio/mpeg",
+                published_at="2026-09-05T12:00:00Z",
+                tagged=True,
+                id3={"TIT2": "ep [LATIN1]", "TALB": "Cast [LATIN1]"},
+            )
+        ]
+    )
+    client = _client(settings, store, authed=True)
+    try:
+        resp = client.get("/")
+    finally:
+        app.dependency_overrides.clear()
+    assert resp.status_code == 200
+    assert "<details" in resp.text
+    assert "TIT2" in resp.text and "ep [LATIN1]" in resp.text
+    assert 'href="https://blob.test/ep.mp3"' in resp.text
+    assert 'download="ep.mp3"' in resp.text

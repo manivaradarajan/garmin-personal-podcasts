@@ -46,8 +46,18 @@ table { width: 100%; border-collapse: collapse; font-size: .875rem; }
   display: inline-block;
   background: #eef2ff; color: #4338ca;
   border-radius: 999px; padding: .15rem .6rem; font-size: .75rem;
-  white-space: nowrap;
+  white-space: nowrap; cursor: pointer;
 }
+.tag-details[open] .tag-badge { background: #c7d2fe; }
+.tag-table { margin-top: .5rem; font-size: .75rem; }
+.tag-table td { padding: .1rem .4rem; white-space: normal; }
+.tag-table td:first-child { font-weight: 700; color: #4338ca; }
+.dl-icon {
+  display: inline-block;
+  margin-left: .5rem;
+  color: #6b7280; text-decoration: none; font-size: .9rem;
+}
+.dl-icon:hover { color: #4f46e5; }
 th { text-align: left; padding: .5rem .75rem; color: #6b7280; font-weight: 600;
      border-bottom: 1.5px solid #e5e7eb; white-space: nowrap; }
 td { padding: .5rem .75rem; border-bottom: 1px solid #f3f4f6; vertical-align: top; }
@@ -193,6 +203,8 @@ tr:last-child td { border-bottom: none; }
       <tr>
         <td class="name-cell">
           {{ entry.name }}
+          <a class="dl-icon" href="{{ entry.blob_url }}"
+             download="{{ entry.name }}" title="Download {{ entry.name }}">⬇</a>
           <!-- Audio player -->
           <div class="audio-player" data-player="{{ loop.index0 }}">
             <audio id="audio-{{ loop.index0 }}"
@@ -215,7 +227,16 @@ tr:last-child td { border-bottom: none; }
         <td style="color:#6b7280">{{ entry.mime_type }}</td>
         <td style="white-space:nowrap">
           {% if entry.tagged %}
-          <span class="tag-badge" title="Carries ID3 tags for Garmin display">🏷 ID3</span>
+          <details class="tag-details">
+            <summary class="tag-badge" title="Carries ID3 tags for Garmin display">🏷 ID3</summary>
+            {% if entry.id3 %}
+            <table class="tag-table">
+              {% for frame_id, value in entry.id3.items() %}
+              <tr><td>{{ frame_id }}</td><td>{{ value }}</td></tr>
+              {% endfor %}
+            </table>
+            {% endif %}
+          </details>
           {% else %}
           <span style="color:#d1d5db">—</span>
           {% endif %}
