@@ -40,11 +40,18 @@ builder canonicalises `audio/mp3` → `audio/mpeg` (and `audio/x-m4a` →
 
 Untagged MP3s (raw MPEG frames from byte 0) collapse into a single entry
 or vanish on the watch. Sync auto-prepends minimal ID3v2.3 tags
-(title, album, genre=Podcast) to untagged MP3s; already-tagged files pass
-through byte-identical. Use ID3v2.3, not v2.4 (older firmware).
+(title, album, genre, track number, length) to untagged MP3s; already-
+tagged files pass through byte-identical. Use ID3v2.3, not v2.4 (older
+firmware).
 Caveat found while building this: `mutagen`'s `MP3.save()` to a file-like
 object wrote tags without audio in our version — the code builds a fresh
 `ID3` object and prepends it to the stripped frames instead.
+Refinement from a real watch test: title/artist/album/genre alone was NOT
+enough — the episode stayed invisible until TRCK (track number) and TLEN
+(length in ms) were added. A working file's genre was literally "genre",
+so frame *presence* matters more than genre *content*. Feed items also
+carry `<itunes:duration>` (Apple Podcasts standard) from the manifest's
+`duration_sec`.
 
 ## Starlette 1.x broke two APIs we used
 
