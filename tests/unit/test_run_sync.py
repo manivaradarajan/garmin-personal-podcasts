@@ -215,3 +215,16 @@ def test_mp3_upload_is_tagged_and_sized() -> None:
     assert entry.size_bytes > len(raw)
     assert entry.size_bytes == len(store._blobs["song.mp3"])
     assert store._blobs["song.mp3"][:3] == b"ID3"
+    assert entry.tagged is True
+
+
+def test_untagged_passthrough_records_tagged_false() -> None:
+    """Non-MP3 uploads record tagged=False."""
+    store = InMemoryBlobStore()
+    run_sync(
+        _StubSettings(),  # type: ignore[arg-type]
+        store,
+        _StubDrive([_drive("plain")]),  # type: ignore[arg-type]
+    )
+    (entry,) = store.read_manifest()
+    assert entry.tagged is False

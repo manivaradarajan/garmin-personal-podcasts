@@ -246,3 +246,35 @@ def test_dashboard_degrades_when_drive_unreachable(
     assert resp.status_code == 200
     assert "Couldn" in resp.text
     assert "ep1.mp3" in resp.text
+
+
+def test_dashboard_shows_id3_badge_for_tagged_files() -> None:
+    """Tagged entries render the ID3 badge; untagged ones do not."""
+    from dataclasses import replace
+
+    from podcast.models import ManifestEntry
+
+    settings = make_settings()
+    store = make_store()
+    tagged_entry = ManifestEntry(
+        drive_file_id="fid-tagged",
+        drive_md5="md5",
+        blob_url="https://blob.test/tagged.mp3",
+        name="tagged.mp3",
+        size_bytes=100,
+        mime_type="audio/mpeg",
+        published_at="2026-09-05T12:00:00Z",
+        tagged=True,
+    )
+    plain_entry = replace(
+        tagged_entry, drive_file_id="fid-plain", name="plain.mp3", tagged=False
+    )
+    store.write_manifest([tagged_entry, plain_entry])
+    client = _client(settings, store, authed=True)
+    try:
+        resp = client.get("/")
+    finally:
+        app.dependency_overrides.clear()
+    assert resp.status_code == 200
+    assert "🏷 ID3" in resp.text
+    assert resp.text.count('<span class="tag-badge"') == 1

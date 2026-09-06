@@ -38,6 +38,7 @@ class ManifestEntry:
         size_bytes: File size — used in enclosure length.
         mime_type: MIME type — used in enclosure type.
         published_at: ISO 8601 UTC — set at first upload, never updated.
+        tagged: Whether ID3 tags were injected at upload for Garmin display.
     """
 
     drive_file_id: str
@@ -47,6 +48,7 @@ class ManifestEntry:
     size_bytes: int
     mime_type: str
     published_at: str
+    tagged: bool = False
 
 
 @dataclass(frozen=True)

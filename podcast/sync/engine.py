@@ -284,6 +284,7 @@ def _upload_file(
             size_bytes=len(data),
             mime_type=drive_file.mime_type,
             published_at=datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            tagged=data != raw,
         )
     except Exception as exc:
         _LOG.error("Failed to upload %s: %s", drive_file.name, exc)
@@ -325,6 +326,7 @@ def _reupload_file(
             name=drive_file.name,
             size_bytes=len(data),
             mime_type=drive_file.mime_type,
+            tagged=data != raw,
         )
         if blob_url != old_entry.blob_url:
             try:

@@ -49,8 +49,32 @@ def test_write_manifest_includes_updated_at(
 def test_manifest_entry_fields_survive_roundtrip(
     sample_manifest_entry,
 ) -> None:
-    """All seven fields survive a write/read cycle exactly."""
+    """All eight fields survive a write/read cycle exactly."""
     store = InMemoryBlobStore()
     store.write_manifest([sample_manifest_entry])
     (back,) = store.read_manifest()
     assert back == sample_manifest_entry
+
+
+def test_missing_tagged_field_defaults_to_false() -> None:
+    """Manifest JSON predating the tagged flag reads as untagged."""
+    import json
+
+    store = InMemoryBlobStore()
+    payload = {
+        "updated_at": "2026-09-05T12:00:00Z",
+        "entries": [
+            {
+                "drive_file_id": "fid",
+                "drive_md5": "md5",
+                "blob_url": "https://blob.test/ep.mp3",
+                "name": "ep.mp3",
+                "size_bytes": 100,
+                "mime_type": "audio/mpeg",
+                "published_at": "2026-09-05T12:00:00Z",
+            }
+        ],
+    }
+    store.write("manifest.json", json.dumps(payload).encode(), 60)
+    (back,) = store.read_manifest()
+    assert back.tagged is False
