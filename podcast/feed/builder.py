@@ -9,9 +9,31 @@ from xml.etree.ElementTree import Element, SubElement, tostring
 
 from podcast.models import ManifestEntry
 
-__all__ = ["build_rss_xml"]
+__all__ = ["build_rss_xml", "canonical_mime_type"]
 
 _ITUNES_NS = "http://www.itunes.com/dtds/podcast-1.0.dtd"
+
+# Drive reports some MIME types that are not registered IANA types
+# (notably audio/mp3 for uppercase .MP3 files). Normalise enclosure
+# types to canonical equivalents so strict feed validators accept them.
+_CANONICAL_MIME_TYPES = {
+    "audio/mp3": "audio/mpeg",
+    "audio/x-m4a": "audio/mp4",
+    "audio/x-m4b": "audio/mp4",
+}
+
+
+def canonical_mime_type(mime_type: str) -> str:
+    """Map a Drive-reported MIME type to its canonical enclosure type.
+
+    Args:
+        mime_type: MIME type as reported by Drive (may include params).
+
+    Returns:
+        Canonical IANA media type for use in RSS enclosures.
+    """
+    base = mime_type.lower().split(";")[0].strip()
+    return _CANONICAL_MIME_TYPES.get(base, base)
 
 
 def build_rss_xml(
@@ -69,6 +91,8 @@ def _add_channel_metadata(
     SubElement(channel, "link").text = base_url
     SubElement(channel, "description").text = title
     SubElement(channel, "language").text = "en"
+    SubElement(channel, "itunes:author").text = title
+    SubElement(channel, "itunes:explicit").text = "no"
     SubElement(channel, "lastBuildDate").text = _rfc2822_now()
     SubElement(
         channel,
@@ -91,6 +115,7 @@ def _add_item(channel: Element, entry: ManifestEntry) -> None:
     """
     item = SubElement(channel, "item")
     SubElement(item, "title").text = entry.name
+    SubElement(item, "description").text = entry.name
     guid = SubElement(item, "guid", {"isPermaLink": "false"})
     guid.text = entry.drive_file_id
     SubElement(item, "pubDate").text = _iso_to_rfc2822(entry.published_at)
@@ -100,7 +125,7 @@ def _add_item(channel: Element, entry: ManifestEntry) -> None:
         {
             "url": entry.blob_url,
             "length": str(entry.size_bytes),
-            "type": entry.mime_type,
+            "type": canonical_mime_type(entry.mime_type),
         },
     )
 

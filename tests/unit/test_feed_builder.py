@@ -4,7 +4,11 @@ from __future__ import annotations
 
 import xml.etree.ElementTree as ET
 
-from podcast.feed.builder import _iso_to_rfc2822, build_rss_xml
+from podcast.feed.builder import (
+    _iso_to_rfc2822,
+    build_rss_xml,
+    canonical_mime_type,
+)
 from podcast.models import ManifestEntry
 
 
@@ -110,3 +114,56 @@ def test_iso_to_rfc2822_z_suffix_handled() -> None:
     """Z suffix is parsed as UTC."""
     out = _iso_to_rfc2822("2026-09-05T12:00:00Z")
     assert "05 Sep 2026 12:00:00" in out
+
+
+def test_canonical_mime_normalises_drive_quirks() -> None:
+    """Non-standard Drive MIME types map to canonical equivalents."""
+    assert canonical_mime_type("audio/mp3") == "audio/mpeg"
+    assert canonical_mime_type("audio/x-m4a") == "audio/mp4"
+    assert canonical_mime_type("audio/x-m4b") == "audio/mp4"
+
+
+def test_canonical_mime_passes_through_standard_types() -> None:
+    """Standard types and parameters survive canonicalisation."""
+    assert canonical_mime_type("audio/mpeg") == "audio/mpeg"
+    assert canonical_mime_type("audio/mp4") == "audio/mp4"
+    assert canonical_mime_type("audio/mpeg; charset=binary") == "audio/mpeg"
+
+
+def test_enclosure_type_is_canonical() -> None:
+    """Enclosure type uses the canonical MIME, not the raw Drive value."""
+    xml = build_rss_xml(
+        [
+            ManifestEntry(
+                drive_file_id="fid",
+                drive_md5="md5",
+                blob_url="https://blob.test/ep.mp3",
+                name="ep.mp3",
+                size_bytes=100,
+                mime_type="audio/mp3",
+                published_at="2026-09-05T12:00:00Z",
+            )
+        ],
+        "T",
+        "https://f/feed",
+        "https://base",
+    )
+    enc = ET.fromstring(xml).find(".//enclosure")
+    assert enc is not None and enc.get("type") == "audio/mpeg"
+
+
+def test_item_has_description() -> None:
+    """Each item carries a description element for strict validators."""
+    xml = build_rss_xml([_entry()], "T", "https://f/feed", "https://base")
+    desc = ET.fromstring(xml).find(".//item/description")
+    assert desc is not None and desc.text == "Episode 1.mp3"
+
+
+def test_channel_has_itunes_author_and_explicit() -> None:
+    """Channel declares itunes author and non-explicit flag."""
+    xml = build_rss_xml([], "My Cast", "https://f/feed", "https://base")
+    channel = ET.fromstring(xml).find("channel")
+    assert channel is not None
+    ns = "{http://www.itunes.com/dtds/podcast-1.0.dtd}"
+    assert channel.findtext(f"{ns}author") == "My Cast"
+    assert channel.findtext(f"{ns}explicit") == "no"
