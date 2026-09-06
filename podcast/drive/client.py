@@ -29,7 +29,13 @@ _AUDIO_MIME_TYPES = (
     "audio/x-m4a",
 )
 _PAGE_SIZE = 100
-_LIST_FIELDS = "nextPageToken,files(id,name,mimeType,size,md5Checksum)"
+_LIST_FIELDS = (
+    "nextPageToken,"
+    "files(id,name,mimeType,size,md5Checksum,"
+    "shortcutDetails(targetId,targetMimeType))"
+)
+_SHORTCUT_MIME_TYPE = "application/vnd.google-apps.shortcut"
+_TARGET_FIELDS = "id,name,mimeType,size,md5Checksum,trashed"
 
 
 class DriveListError(Exception):
@@ -59,7 +65,13 @@ class DriveClient:
         self._service = build("drive", "v3", credentials=credentials)
 
     def list_audio_files(self) -> list[DriveFile]:
-        """List all audio files in the configured folder.
+        """List audio files in the configured folder, resolving shortcuts.
+
+        Shortcuts (`application/vnd.google-apps.shortcut`) pointing at
+        audio files are resolved to their targets and synced as MP3s. The
+        manifest identity is the shortcut ID (stable across retargets);
+        change detection uses the target checksum. Non-audio, broken, or
+        trashed targets are skipped with a warning — never deleted over.
 
         Pages through the full listing; raises DriveListError on any page
         failure so the caller can abort the sync rather than proceed with a
@@ -76,6 +88,7 @@ class DriveClient:
             " and trashed = false"
             " and ("
             + " or ".join(f"mimeType = '{m}'" for m in _AUDIO_MIME_TYPES)
+            + f" or mimeType = '{_SHORTCUT_MIME_TYPE}'"
             + ")"
         )
         files: list[DriveFile] = []
@@ -88,7 +101,10 @@ class DriveClient:
                 raise DriveListError(f"Drive listing failed: {exc}") from exc
 
             for item in response.get("files", []):
-                drive_file = _parse_drive_item(item)
+                if item.get("mimeType") == _SHORTCUT_MIME_TYPE:
+                    drive_file = self._resolve_shortcut(item)
+                else:
+                    drive_file = _parse_drive_item(item)
                 if drive_file is not None:
                     files.append(drive_file)
 
@@ -101,8 +117,10 @@ class DriveClient:
     def stream_file(self, file_id: str) -> Iterator[bytes]:
         """Stream audio file content from Drive in chunks.
 
+        Shortcut IDs resolve transparently to their current target.
+
         Args:
-            file_id: Drive file ID to download.
+            file_id: Drive file ID (or shortcut ID) to download.
 
         Yields:
             Chunks of file content as bytes.
@@ -112,7 +130,8 @@ class DriveClient:
         """
         import io
 
-        request = self._service.files().get_media(fileId=file_id)
+        target_id = self._target_id_for(file_id)
+        request = self._service.files().get_media(fileId=target_id)
         buffer = io.BytesIO()
         downloader = MediaIoBaseDownload(buffer, request, chunksize=1024 * 1024)
         done = False
@@ -124,6 +143,99 @@ class DriveClient:
             if not chunk:
                 break
             yield chunk
+
+    def _target_id_for(self, file_id: str) -> str:
+        """Resolve a file ID to its downloadable target ID.
+
+        Args:
+            file_id: Drive file or shortcut ID.
+
+        Returns:
+            Target file ID for shortcuts, otherwise the input unchanged.
+        """
+        meta = (
+            self._service.files()
+            .get(
+                fileId=file_id,
+                fields="mimeType,shortcutDetails(targetId)",
+                supportsAllDrives=True,
+            )
+            .execute()
+        )
+        if meta.get("mimeType") == _SHORTCUT_MIME_TYPE:
+            details = meta.get("shortcutDetails") or {}
+            if details.get("targetId"):
+                return details["targetId"]
+        return file_id
+
+    def _resolve_shortcut(self, item: dict[str, Any]) -> DriveFile | None:
+        """Resolve a shortcut item to its audio target file.
+
+        Args:
+            item: Raw shortcut dict from the Drive listing.
+
+        Returns:
+            DriveFile keyed by shortcut ID with target content metadata,
+            or None when the target is missing, non-audio, trashed, or
+            unreadable (e.g. not shared with the service account).
+        """
+        shortcut_id = item.get("id")
+        shortcut_name = item.get("name")
+        details = item.get("shortcutDetails") or {}
+        target_id = details.get("targetId")
+        if not shortcut_id or not target_id:
+            _LOG.warning("Skipping shortcut with missing IDs: %s", item)
+            return None
+        try:
+            target = (
+                self._service.files()
+                .get(
+                    fileId=target_id,
+                    fields=_TARGET_FIELDS,
+                    supportsAllDrives=True,
+                )
+                .execute()
+            )
+        except Exception as exc:
+            _LOG.warning(
+                "Skipping shortcut %s: cannot read target %s: %s",
+                shortcut_id,
+                target_id,
+                exc,
+            )
+            return None
+        if target.get("trashed"):
+            _LOG.info("Skipping shortcut %s: target is trashed", shortcut_id)
+            return None
+        target_mime = target.get("mimeType") or ""
+        if not target_mime.startswith("audio/"):
+            _LOG.info(
+                "Skipping shortcut %s: non-audio target %s",
+                shortcut_id,
+                target_mime,
+            )
+            return None
+        target_md5 = target.get("md5Checksum")
+        size_str = target.get("size")
+        if not target_md5 or not size_str:
+            _LOG.warning(
+                "Skipping shortcut %s: target lacks md5/size", shortcut_id
+            )
+            return None
+        try:
+            size_bytes = int(size_str)
+        except TypeError, ValueError:
+            _LOG.warning(
+                "Skipping shortcut %s: invalid target size", shortcut_id
+            )
+            return None
+        return DriveFile(
+            id=shortcut_id,
+            name=shortcut_name or target.get("name", "untitled"),
+            mime_type=target_mime,
+            size_bytes=size_bytes,
+            md5=target_md5,
+        )
 
     def _fetch_page(self, query: str, page_token: str | None) -> dict[str, Any]:
         """Execute one Drive files.list page request.

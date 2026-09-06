@@ -93,5 +93,8 @@ pydantic-settings defaults to `extra="forbid"` — every request 500'd.
 - In Jinja, `pending.update` resolves to the dict method, not the key —
   always use `pending["update"]` bracket access.
 - Python 3.14 accepts the old `except E1, E2:` comma form (behaves as a
-  tuple). Still write parenthesised tuples — readers and older Pythons
-  expect them.
+  tuple). Worse: `ruff format` 0.16.6 actively strips parentheses from
+  `except (E1, E2):`, producing the comma form — verified empirically,
+  do not hand-fix it back (futile). Correct on 3.14 only; would
+  SyntaxError on older Pythons, so `requires-python >= 3.14` is
+  load-bearing, not cosmetic.
